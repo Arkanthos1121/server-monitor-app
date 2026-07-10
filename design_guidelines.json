@@ -1,0 +1,176 @@
+{
+  "app_name": "WebminPulse",
+  "personality": "7 Dark-First Utility DARK",
+  "personality_one_liner": "A futuristic, cyber-ops command center with electric neon accents against deep obsidian, built for rapid infrastructure triage.",
+  "color": {
+    "surface": "#090A0F",
+    "onSurface": "#F3F4F6",
+    "surfaceSecondary": "#11131A",
+    "onSurfaceSecondary": "#9CA3AF",
+    "surfaceTertiary": "#1A1D27",
+    "onSurfaceTertiary": "#D1D5DB",
+    "surfaceInverse": "#F3F4F6",
+    "onSurfaceInverse": "#090A0F",
+    "brand": "#00E5FF",
+    "brandPrimary": "#00E5FF",
+    "onBrandPrimary": "#000000",
+    "brandSecondary": "#00B3CC",
+    "onBrandSecondary": "#000000",
+    "brandTertiary": "#00333D",
+    "onBrandTertiary": "#00E5FF",
+    "success": "#39FF14",
+    "onSuccess": "#000000",
+    "warning": "#FFB000",
+    "onWarning": "#000000",
+    "error": "#FF2A2A",
+    "onError": "#FFFFFF",
+    "info": "#00E5FF",
+    "onInfo": "#000000",
+    "border": "#262A36",
+    "borderStrong": "#00E5FF",
+    "divider": "#1A1D27"
+  },
+  "typography": {
+    "displayFontFamily": "Rajdhani",
+    "textFontFamily": "Space Grotesk",
+    "monoFontFamily": "IBM Plex Mono",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Dense information architecture. Use small margins (sm/md) to pack metrics efficiently, utilizing borders instead of large whitespace to separate data zones.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 4,
+    "md": 8,
+    "lg": 12,
+    "pill": 999
+  },
+  "shadow_tier": 0,
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": false,
+    "do's": [
+      "Use solid dark surfaces with high-contrast sharp borders",
+      "Rely on color states to differentiate depth rather than glass"
+    ],
+    "dont's": [
+      "Do not use blur or glassmorphism—it reduces glanceability in dense data environments"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler",
+    "haptics": "expo-haptics"
+  },
+  "screens": [
+    {
+      "name": "Auth / Login",
+      "purpose": "Gateway to the command center, setting the cyber-ops mood with a glowing hero visual.",
+      "states": {
+        "loading": "Animated glowing neon spinner with monospace 'AUTHENTICATING...'",
+        "empty": "N/A",
+        "error": "Signal red toast 'ACCESS DENIED' with error details."
+      },
+      "layout": "Hero image background with gradient scrim. Condensed input fields with sharp borders. A glowing Primary button for Google Login, followed by standard email/password."
+    },
+    {
+      "name": "Dashboard (Home)",
+      "purpose": "Live grid of all server states, focusing on immediate visibility of outages or spikes.",
+      "states": {
+        "loading": "Skeleton grid with scanning laser animation.",
+        "empty": "Illustration of an empty server rack; CTA 'INITIALIZE SERVER' in brand color.",
+        "error": "Offline state taking full screen with a retry ping button."
+      },
+      "layout": "Header with global status summary (e.g., 'ALL SYSTEMS NOMINAL'). Main body is a 2-column grid of Server Cards. Each card uses monospace fonts for CPU/RAM percentages, a glowing dot (green/red) for online status, and small bar charts. Sticky FAB for 'Add Server'."
+    },
+    {
+      "name": "Server Detail",
+      "purpose": "Deep dive into a specific server's telemetry with live gauges and action controls.",
+      "states": {
+        "loading": "Pulse animation on gauges.",
+        "empty": "N/A",
+        "error": "Large red warning block indicating server is unreachable."
+      },
+      "layout": "Top section: Server Name + IP + Uptime counter. Middle: 3 Animated circular gauges (CPU, RAM, Disk) in neon colors based on threshold (cyan -> amber -> red). Bottom section: List of pending updates. Fixed bottom container: Full-width sticky 'OPEN WEBMIN PANEL' button."
+    },
+    {
+      "name": "Add / Edit Server",
+      "purpose": "Form to connect a new Webmin instance to the dashboard.",
+      "states": {
+        "loading": "Testing connection spinner.",
+        "empty": "N/A",
+        "error": "Inline validation errors in monospace red."
+      },
+      "layout": "Single column form. Inputs have floating labels and sharp borders. Password field masked. Bottom sticky 'SAVE \u0026 CONNECT' button."
+    },
+    {
+      "name": "Alerts",
+      "purpose": "Chronological history of threshold breaches and server downtimes.",
+      "states": {
+        "loading": "Loading skeleton list.",
+        "empty": "Icon of a shield + 'NO INCIDENTS DETECTED'.",
+        "error": "Failed to sync alerts."
+      },
+      "layout": "List layout. Each row has a timeline node (red for offline, amber for CPU spike). Includes timestamp in monospace and incident description."
+    },
+    {
+      "name": "Settings",
+      "purpose": "Configuration for polling rates and alert thresholds.",
+      "states": {
+        "loading": "N/A",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Standard list of settings rows with toggle switches or segmented controls for polling interval (30s, 1m, 5m)."
+    }
+  ],
+  "images": {
+    "login_hero_bg": {
+      "url": "https://images.unsplash.com/photo-1532190872407-280735d27e08?crop=entropy\u0026cs=srgb\u0026fm=jpg\u0026ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGRhcmslMjBmdXR1cmlzdGljJTIwZ2xvd2luZyUyMHRlY2glMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc4MzcyNDE5OHww\u0026ixlib=rb-4.1.0\u0026q=85",
+      "alt": "Dark futuristic glowing background"
+    },
+    "google_logo_fallback": {
+      "url": "https://images.unsplash.com/photo-1662947190722-5d272f82a526?crop=entropy\u0026cs=srgb\u0026fm=jpg\u0026ixid=M3w3NDk1Nzd8MHwxfHNlYXJjaHwxfHxnb29nbGUlMjBsb2dvJTIwcG5nJTIwdHJhbnNwYXJlbnR8ZW58MHx8fHwxNzgzNzI0MTk4fDA\u0026ixlib=rb-4.1.0\u0026q=85",
+      "alt": "Google logo"
+    }
+  },
+  "haptics": {
+    "tab_press": "light",
+    "button_primary": "medium",
+    "server_card_tap": "light",
+    "gauge_threshold_breach": "heavy",
+    "refresh_swipe": "medium",
+    "toggle_switch": "light"
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the Dark-First Utility DARK personality. No glassmorphism; use solid, sharp-bordered #11131A containers over a #090A0F background.",
+    "Utilize IBM Plex Mono for all telemetry data (IP addresses, CPU/RAM percentages, uptime counters) to reinforce the futuristic cyber-ops aesthetic.",
+    "For the 'Server Detail' screen, use react-native-reanimated or SVG arcs to build glowing circular gauges for CPU/RAM/Disk. Change the stroke color from brandPrimary (cyan) to warning (amber) to error (red) dynamically based on value.",
+    "Status indicators on the 'Dashboard' cards must be glowing dots (neon green for online, signal red for offline) using a subtle outer shadow/glow effect mapping to the status color.",
+    "Ensure 'Open Webmin Panel' button on the Server Detail screen is sticky at the bottom of the screen (inside a safe area container) and stands out.",
+    "Add a top-down gradient scrim (transparent to surfaceInverse) over the `login_hero_bg` to ensure readability of the auth form overlaid on the abstract background.",
+    "Use Phosphor icons with 'bold' or 'fill' weight for clear, high-contrast legibility."
+  ]
+}
