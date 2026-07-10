@@ -92,12 +92,14 @@ class ServerUpdateBody(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     use_ssl: Optional[bool] = None
+    alerts_enabled: Optional[bool] = None
 
 
 class SettingsBody(BaseModel):
     cpu_threshold: Optional[int] = None
     ram_threshold: Optional[int] = None
     alerts_enabled: Optional[bool] = None
+    poll_interval_minutes: Optional[int] = None
 
 
 class RegisterPushBody(BaseModel):
@@ -132,6 +134,7 @@ def public_user(u: dict) -> dict:
         "cpu_threshold": u.get("cpu_threshold", 85),
         "ram_threshold": u.get("ram_threshold", 85),
         "alerts_enabled": u.get("alerts_enabled", True),
+        "poll_interval_minutes": u.get("poll_interval_minutes", 30),
     }
 
 
@@ -335,7 +338,7 @@ async def create_alert(user_id: str, server: dict, atype: str, message: str, sev
 async def evaluate_and_alert(user: dict, server: dict, status: dict):
     """Compare new status to previous snapshot and raise alerts on transitions."""
     prev = server.get("last_status") or {}
-    if not user.get("alerts_enabled", True):
+    if not user.get("alerts_enabled", True) or not server.get("alerts_enabled", True):
         return
     cpu_t = user.get("cpu_threshold", 85)
     ram_t = user.get("ram_threshold", 85)
@@ -358,6 +361,24 @@ async def evaluate_and_alert(user: dict, server: dict, status: dict):
             await create_alert(user["user_id"], server, "updates", f"{upd} package update(s) available.", "info")
 
 
+async def record_metric(server_id: str, status: dict):
+    """Persist a telemetry sample for history/sparklines (online samples only)."""
+    if not status.get("online"):
+        return
+    if status.get("cpu") is None and status.get("ram") is None:
+        return
+    try:
+        await db.metrics.insert_one({
+            "server_id": server_id,
+            "ts": now_utc(),
+            "cpu": status.get("cpu"),
+            "ram": status.get("ram"),
+            "disk": status.get("disk"),
+        })
+    except Exception as e:
+        logger.warning(f"metric insert failed: {e}")
+
+
 # =========================== Auth routes ====================================
 @api.post("/auth/register")
 async def register(body: SignupBody):
@@ -373,6 +394,7 @@ async def register(body: SignupBody):
         "cpu_threshold": 85,
         "ram_threshold": 85,
         "alerts_enabled": True,
+        "poll_interval_minutes": 30,
         "created_at": now_utc().isoformat(),
     }
     await db.users.insert_one(dict(user))
@@ -406,6 +428,7 @@ async def google_login(body: GoogleBody):
             "cpu_threshold": 85,
             "ram_threshold": 85,
             "alerts_enabled": True,
+            "poll_interval_minutes": 30,
             "created_at": now_utc().isoformat(),
         }
         await db.users.insert_one(dict(user))
@@ -447,6 +470,7 @@ def server_public(s: dict) -> dict:
         "username": s["username"],
         "use_ssl": s.get("use_ssl", True),
         "webmin_url": f"{'https' if s.get('use_ssl', True) else 'http'}://{s['host']}:{s['port']}/",
+        "alerts_enabled": s.get("alerts_enabled", True),
         "last_status": s.get("last_status"),
         "created_at": s.get("created_at"),
     }
@@ -463,12 +487,14 @@ async def add_server(body: ServerBody, user: dict = Depends(get_current_user)):
         "username": body.username,
         "password": enc_secret(body.password),
         "use_ssl": body.use_ssl,
+        "alerts_enabled": True,
         "last_status": None,
         "created_at": now_utc().isoformat(),
     }
     status = await check_server(srv)
     srv["last_status"] = status
     await db.servers.insert_one(dict(srv))
+    await record_metric(srv["id"], status)
     return server_public(srv)
 
 
@@ -517,6 +543,7 @@ async def check_one(server_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(404, "Server not found")
     status = await check_server(srv)
     await evaluate_and_alert(user, srv, status)
+    await record_metric(server_id, status)
     await db.servers.update_one({"id": server_id}, {"$set": {"last_status": status}})
     fresh = await db.servers.find_one({"id": server_id}, {"_id": 0})
     return server_public(fresh)
@@ -529,12 +556,32 @@ async def check_all(user: dict = Depends(get_current_user)):
     async def _run(srv):
         status = await check_server(srv)
         await evaluate_and_alert(user, srv, status)
+        await record_metric(srv["id"], status)
         await db.servers.update_one({"id": srv["id"]}, {"$set": {"last_status": status}})
 
     await asyncio.gather(*[_run(s) for s in servers], return_exceptions=True)
     fresh = await db.servers.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(500)
     fresh.sort(key=lambda s: s.get("created_at") or "")
     return [server_public(s) for s in fresh]
+
+
+@api.get("/servers/{server_id}/history")
+async def server_history(server_id: str, limit: int = 60, user: dict = Depends(get_current_user)):
+    srv = await db.servers.find_one({"id": server_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not srv:
+        raise HTTPException(404, "Server not found")
+    limit = max(1, min(limit, 200))
+    docs = await db.metrics.find({"server_id": server_id}, {"_id": 0}).sort("ts", -1).to_list(limit)
+    docs.reverse()
+    return [
+        {
+            "ts": d["ts"].isoformat() if isinstance(d.get("ts"), datetime) else d.get("ts"),
+            "cpu": d.get("cpu"),
+            "ram": d.get("ram"),
+            "disk": d.get("disk"),
+        }
+        for d in docs
+    ]
 
 
 # =========================== Alerts routes ==================================
@@ -565,6 +612,7 @@ async def poller_loop():
         try:
             servers = await db.servers.find({}, {"_id": 0}).to_list(2000)
             users_cache: dict = {}
+            checked = 0
             for srv in servers:
                 uid = srv["user_id"]
                 if uid not in users_cache:
@@ -572,13 +620,30 @@ async def poller_loop():
                 user = users_cache[uid]
                 if not user:
                     continue
+                interval_min = user.get("poll_interval_minutes", 30)
+                last = (srv.get("last_status") or {}).get("checked_at")
+                due = True
+                if last:
+                    try:
+                        lt = datetime.fromisoformat(last)
+                        if lt.tzinfo is None:
+                            lt = lt.replace(tzinfo=timezone.utc)
+                        due = (now_utc() - lt).total_seconds() >= interval_min * 60
+                    except Exception:
+                        due = True
+                if not due:
+                    continue
                 status = await check_server(srv)
                 await evaluate_and_alert(user, srv, status)
+                await record_metric(srv["id"], status)
                 await db.servers.update_one({"id": srv["id"]}, {"$set": {"last_status": status}})
-            logger.info(f"Poller cycle complete: {len(servers)} servers checked")
+                checked += 1
+            if checked:
+                logger.info(f"Poller cycle: {checked} servers checked")
         except Exception as e:
             logger.warning(f"poller error: {e}")
-        await asyncio.sleep(POLL_INTERVAL)
+        # Wake up frequently; per-user interval is enforced per server above.
+        await asyncio.sleep(60)
 
 
 @app.on_event("startup")
@@ -588,6 +653,8 @@ async def startup():
     await db.user_sessions.create_index("session_token", unique=True)
     await db.servers.create_index("user_id")
     await db.alerts.create_index("user_id")
+    await db.metrics.create_index("server_id")
+    await db.metrics.create_index("ts", expireAfterSeconds=7 * 24 * 3600)
     asyncio.create_task(poller_loop())
     logger.info("WebminPulse backend started")
 

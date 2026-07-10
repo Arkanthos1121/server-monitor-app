@@ -26,15 +26,21 @@ updates and notify. (User asked to pause and check in at ~50 credits.)
 ## Implemented (2026-07-10)
 - Auth: register/login (email+pw, bcrypt+JWT), Google OAuth (Emergent), /auth/me, settings.
 - Server CRUD (per-user), immediate check on add, check-one, check-all (pull-to-refresh).
-- Dashboard: 2-col grid, global summary, online/offline glowing dots, CPU/RAM bars, updates badge,
-  empty state, FAB.
-- Server Detail: animated CPU/RAM/Disk gauges (threshold color), uptime/load/last-check, updates
-  list, sticky "Open Webmin Panel" (in-app WebView + browser fallback), edit/delete.
-- Alerts screen (timeline log) + clear; Settings (thresholds, alerts toggle, poll info, logout).
-- Background poller (30 min) with alert transitions: offline/online, CPU>threshold, RAM>threshold,
-  updates available → creates alert + sends push (non-blocking).
-- Push endpoints: /api/register-push + send_push helper (Emergent relay). Client registers device
-  token on login/app-open; tap handlers + cold-start in _layout.
+- Dashboard, Server Detail (gauges + sticky Open Webmin), Alerts, Settings.
+- Background poller with alert transitions: offline/online, CPU>threshold, RAM>threshold, updates.
+- Push endpoints + client registration + tap handlers.
+- Webmin passwords encrypted at rest (Fernet).
+
+## Implemented — Feature Update (2026-07-10, session 2)
+- Historical telemetry: `db.metrics` samples CPU/RAM/disk on every check (7-day TTL). New
+  `GET /api/servers/{id}/history?limit=` endpoint. Server Detail renders CPU% / RAM% SVG
+  sparklines (Sparkline component) with "Collecting data…" empty state.
+- Per-server alert toggle: `alerts_enabled` field on each server; toggle on Server Detail;
+  `evaluate_and_alert` respects both user-level and server-level flags.
+- Configurable poll interval: `user.poll_interval_minutes` (5/15/30/60) via segmented control in
+  Settings; poller now wakes every 60s and checks each server when its user's interval elapses.
+- iPhone 17 / iOS 26: Expo SDK 54 (iOS 26 compatible), safe-area insets throughout. Runs in Expo
+  Go now; standalone build via Publish for push + self-signed WebView.
 
 ## Verified
 - Backend curl: register/login/me, add server (offline detection ~10s), check-all, wrong-pw 401, alerts.

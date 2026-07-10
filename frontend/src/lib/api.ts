@@ -75,8 +75,16 @@ export type Server = {
   username: string;
   use_ssl: boolean;
   webmin_url: string;
+  alerts_enabled: boolean;
   last_status: ServerStatus | null;
   created_at: string;
+};
+
+export type MetricSample = {
+  ts: string;
+  cpu: number | null;
+  ram: number | null;
+  disk: number | null;
 };
 
 export type Alert = {
@@ -97,4 +105,5 @@ export type User = {
   cpu_threshold: number;
   ram_threshold: number;
   alerts_enabled: boolean;
+  poll_interval_minutes: number;
 };

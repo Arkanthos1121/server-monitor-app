@@ -31,6 +31,7 @@ export default function Settings() {
   const [cpu, setCpu] = useState(user?.cpu_threshold ?? 85);
   const [ram, setRam] = useState(user?.ram_threshold ?? 85);
   const [alertsEnabled, setAlertsEnabled] = useState(user?.alerts_enabled ?? true);
+  const [pollInterval, setPollInterval] = useState(user?.poll_interval_minutes ?? 30);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -38,7 +39,12 @@ export default function Settings() {
     setSaving(true);
     setSaved(false);
     try {
-      await api.put<User>("/api/settings", { cpu_threshold: cpu, ram_threshold: ram, alerts_enabled: alertsEnabled });
+      await api.put<User>("/api/settings", {
+        cpu_threshold: cpu,
+        ram_threshold: ram,
+        alerts_enabled: alertsEnabled,
+        poll_interval_minutes: pollInterval,
+      });
       await refreshUser();
       setSaved(true);
     } catch {
@@ -46,6 +52,8 @@ export default function Settings() {
       setSaving(false);
     }
   };
+
+  const POLL_OPTIONS = [5, 15, 30, 60];
 
   return (
     <ScrollView
@@ -92,10 +100,27 @@ export default function Settings() {
         <View style={styles.infoRow}>
           <Ionicons name="time-outline" size={18} color={colors.brand} />
           <Text style={styles.rowLabel}>Background Poll Interval</Text>
-          <Text style={styles.infoValue}>30 MIN</Text>
+        </View>
+        <View style={styles.segment}>
+          {POLL_OPTIONS.map((opt) => {
+            const active = pollInterval === opt;
+            return (
+              <Pressable
+                key={opt}
+                testID={`poll-${opt}`}
+                onPress={() => setPollInterval(opt)}
+                style={[styles.segmentItem, active && styles.segmentItemActive]}
+              >
+                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                  {opt < 60 ? `${opt}m` : "1h"}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
         <Text style={styles.rowHint}>
-          Servers are checked automatically every 30 minutes. Pull down on the grid for an instant refresh.
+          Servers are checked automatically every {pollInterval < 60 ? `${pollInterval} minutes` : "hour"}. Pull down on
+          the grid for an instant refresh.
         </Text>
       </View>
 
@@ -137,6 +162,11 @@ const styles = StyleSheet.create({
   stepValue: { fontFamily: fonts.monoMedium, fontSize: 16, color: colors.onSurface, minWidth: 44, textAlign: "center" },
   infoRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   infoValue: { fontFamily: fonts.monoMedium, fontSize: 13, color: colors.brand, marginLeft: "auto" },
+  segment: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, marginBottom: spacing.sm },
+  segmentItem: { flex: 1, paddingVertical: spacing.sm, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, alignItems: "center" },
+  segmentItemActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  segmentText: { fontFamily: fonts.monoMedium, fontSize: 14, color: colors.onSurfaceSecondary },
+  segmentTextActive: { color: colors.onBrand },
   logout: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, marginTop: spacing.xl, paddingVertical: spacing.md, borderWidth: 1, borderColor: colors.error, borderRadius: radius.md },
   logoutText: { fontFamily: fonts.monoMedium, fontSize: 13, color: colors.error, letterSpacing: 1 },
   version: { fontFamily: fonts.mono, fontSize: 11, color: colors.onSurfaceSecondary, textAlign: "center", marginTop: spacing.xl },

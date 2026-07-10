@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   Modal,
+  Switch,
+  useWindowDimensions,
   Platform,
 } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
@@ -15,24 +17,31 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
-import { api, Server } from "@/src/lib/api";
+import { api, Server, MetricSample } from "@/src/lib/api";
 import { colors, fonts, radius, spacing, metricColor } from "@/src/theme/theme";
 import { NeonButton, StatusDot } from "@/src/components/common";
 import Gauge from "@/src/components/Gauge";
+import Sparkline from "@/src/components/Sparkline";
 
 export default function ServerDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const [server, setServer] = useState<Server | null>(null);
+  const [history, setHistory] = useState<MetricSample[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const s = await api.get<Server>(`/api/servers/${id}`);
+      const [s, h] = await Promise.all([
+        api.get<Server>(`/api/servers/${id}`),
+        api.get<MetricSample[]>(`/api/servers/${id}/history?limit=40`).catch(() => [] as MetricSample[]),
+      ]);
       setServer(s);
+      setHistory(h);
     } catch {
     } finally {
       setLoading(false);
@@ -51,10 +60,20 @@ export default function ServerDetail() {
     try {
       const s = await api.post<Server>(`/api/servers/${id}/check`);
       setServer(s);
+      const h = await api.get<MetricSample[]>(`/api/servers/${id}/history?limit=40`).catch(() => [] as MetricSample[]);
+      setHistory(h);
     } catch {
     } finally {
       setRefreshing(false);
     }
+  }, [id]);
+
+  const toggleAlerts = useCallback(async (val: boolean) => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setServer((prev) => (prev ? { ...prev, alerts_enabled: val } : prev));
+    try {
+      await api.put(`/api/servers/${id}`, { alerts_enabled: val });
+    } catch {}
   }, [id]);
 
   const openWebmin = () => {
@@ -138,6 +157,47 @@ export default function ServerDetail() {
             value={st?.load && st.load.some((x) => x != null) ? st.load.map((x) => (x == null ? "—" : x.toFixed(2))).join("  ") : "—"}
           />
           <InfoLine label="LAST CHECK" value={st?.checked_at ? new Date(st.checked_at).toLocaleTimeString() : "—"} />
+        </View>
+
+        {/* Telemetry history */}
+        <Text style={styles.sectionTitle}>TELEMETRY HISTORY</Text>
+        <View style={styles.historyCard}>
+          <Sparkline
+            label="CPU %"
+            color={colors.brand}
+            data={history.map((h) => h.cpu)}
+            latest={online ? st?.cpu ?? null : null}
+            width={width - spacing.lg * 2 - spacing.md * 2}
+            testID="cpu-sparkline"
+          />
+          <Sparkline
+            label="RAM %"
+            color={colors.warning}
+            data={history.map((h) => h.ram)}
+            latest={online ? st?.ram ?? null : null}
+            width={width - spacing.lg * 2 - spacing.md * 2}
+            testID="ram-sparkline"
+          />
+          <Text style={styles.historyHint}>
+            {history.length >= 2
+              ? `${history.length} samples · captured on each check`
+              : "History builds up as the server is polled over time."}
+          </Text>
+        </View>
+
+        {/* Per-server alerts */}
+        <View style={styles.alertToggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.alertToggleLabel}>Alerts for this node</Text>
+            <Text style={styles.alertToggleHint}>Offline, CPU/RAM spikes & updates</Text>
+          </View>
+          <Switch
+            testID="server-alerts-toggle"
+            value={server.alerts_enabled}
+            onValueChange={toggleAlerts}
+            trackColor={{ true: colors.brandTertiary, false: colors.surfaceTertiary }}
+            thumbColor={server.alerts_enabled ? colors.brand : colors.onSurfaceSecondary}
+          />
         </View>
 
         {/* Updates */}
@@ -227,6 +287,11 @@ const styles = StyleSheet.create({
   infoValue: { fontFamily: fonts.monoMedium, fontSize: 13, color: colors.onSurface, maxWidth: "60%" },
   sectionTitle: { fontFamily: fonts.monoMedium, fontSize: 11, color: colors.brand, letterSpacing: 2, marginTop: spacing.xl, marginBottom: spacing.sm },
   updatesCard: { backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.md },
+  historyCard: { backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.md },
+  historyHint: { fontFamily: fonts.mono, fontSize: 11, color: colors.onSurfaceSecondary, marginTop: spacing.xs },
+  alertToggleRow: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.md, marginTop: spacing.lg },
+  alertToggleLabel: { fontFamily: fonts.bodyMedium, fontSize: 15, color: colors.onSurface },
+  alertToggleHint: { fontFamily: fonts.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
   updatesRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   updatesText: { fontFamily: fonts.body, fontSize: 14, color: colors.onSurfaceSecondary },
   sticky: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
