@@ -10,6 +10,7 @@ from typing import Optional, List
 import jwt
 import bcrypt
 import httpx
+from cryptography.fernet import Fernet
 from fastapi import FastAPI, APIRouter, HTTPException, Header, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -28,6 +29,21 @@ db = client[os.environ["DB_NAME"]]
 
 JWT_SECRET = os.environ["JWT_SECRET"]
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "1800"))
+
+# Encryption for stored Webmin passwords (at rest)
+_fernet = Fernet(os.environ["SERVER_ENC_KEY"].encode())
+
+
+def enc_secret(plain: str) -> str:
+    return _fernet.encrypt(plain.encode()).decode()
+
+
+def dec_secret(token: str) -> str:
+    try:
+        return _fernet.decrypt(token.encode()).decode()
+    except Exception:
+        # Legacy/plaintext fallback
+        return token
 
 # ---- Emergent push relay ---------------------------------------------------
 PUSH_BASE_URL = "https://integrations.emergentagent.com"
@@ -217,7 +233,7 @@ def _parse_stats(data: dict) -> dict:
 async def check_server(srv: dict) -> dict:
     scheme = "https" if srv.get("use_ssl", True) else "http"
     base = f"{scheme}://{srv['host']}:{srv['port']}"
-    auth = (srv["username"], srv["password"])
+    auth = (srv["username"], dec_secret(srv["password"]))
     result = {
         "online": False,
         "cpu": None, "ram": None, "disk": None, "load": None, "uptime": None,
@@ -445,7 +461,7 @@ async def add_server(body: ServerBody, user: dict = Depends(get_current_user)):
         "host": body.host,
         "port": body.port,
         "username": body.username,
-        "password": body.password,
+        "password": enc_secret(body.password),
         "use_ssl": body.use_ssl,
         "last_status": None,
         "created_at": now_utc().isoformat(),
@@ -477,6 +493,8 @@ async def update_server(server_id: str, body: ServerUpdateBody, user: dict = Dep
     if not srv:
         raise HTTPException(404, "Server not found")
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "password" in updates:
+        updates["password"] = enc_secret(updates["password"])
     if updates:
         await db.servers.update_one({"id": server_id}, {"$set": updates})
     fresh = await db.servers.find_one({"id": server_id}, {"_id": 0})
