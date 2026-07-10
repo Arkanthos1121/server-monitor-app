@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "WebminPulse",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -27,6 +27,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-notifications",
       [
         "expo-splash-screen",
         {
