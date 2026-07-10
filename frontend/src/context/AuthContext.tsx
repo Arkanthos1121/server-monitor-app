@@ -6,7 +6,6 @@ import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 
 import { api, setToken, clearToken, getToken, User } from "@/src/lib/api";
-
 type AuthState = {
   user: User | null;
   loading: boolean;
@@ -28,9 +27,13 @@ async function registerForPush(userId: string) {
     const { status } = await Notifications.requestPermissionsAsync();
     if (status !== "granted") return;
     const tokenResp = await Notifications.getDevicePushTokenAsync();
+    const authToken = await getToken();
     await fetch(`${BACKEND_URL}/api/register-push`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
       body: JSON.stringify({ user_id: userId, platform: Platform.OS, device_token: tokenResp.data }),
     });
   } catch {

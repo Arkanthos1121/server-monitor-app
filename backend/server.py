@@ -1,8 +1,11 @@
 import os
 import re
+import time
 import uuid
+import socket
 import asyncio
 import logging
+import ipaddress
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
@@ -103,9 +106,9 @@ class SettingsBody(BaseModel):
 
 
 class RegisterPushBody(BaseModel):
-    user_id: str
     platform: str
     device_token: str
+    user_id: Optional[str] = None  # ignored; kept for backward-compat, derived from token
 
 
 # =========================== Auth helpers ===================================
@@ -233,6 +236,43 @@ def _parse_stats(data: dict) -> dict:
     return out
 
 
+# SSRF guard: block loopback, link-local (incl. 169.254.169.254 cloud metadata) and
+# unspecified ranges. Private LAN (RFC1918) is intentionally ALLOWED — monitoring
+# internal Webmin servers is the app's core purpose.
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("::/128"),
+]
+
+
+def _ip_is_blocked(ip_str: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return any(ip in net for net in _BLOCKED_NETWORKS)
+
+
+def validate_host_allowed(host: str) -> None:
+    """Raise 400 if the host resolves to a blocked (metadata/loopback/link-local) address."""
+    candidates = set()
+    try:
+        candidates.add(str(ipaddress.ip_address(host)))
+    except ValueError:
+        try:
+            for info in socket.getaddrinfo(host, None):
+                candidates.add(info[4][0])
+        except Exception:
+            candidates = set()  # unresolvable now; will simply fail as offline later
+    for ip in candidates:
+        if _ip_is_blocked(ip):
+            raise HTTPException(400, "Host is not allowed (loopback/link-local/metadata addresses are blocked).")
+
+
 async def check_server(srv: dict) -> dict:
     scheme = "https" if srv.get("use_ssl", True) else "http"
     base = f"{scheme}://{srv['host']}:{srv['port']}"
@@ -242,8 +282,14 @@ async def check_server(srv: dict) -> dict:
         "cpu": None, "ram": None, "disk": None, "load": None, "uptime": None,
         "updates": None, "error": None, "checked_at": now_utc().isoformat(),
     }
+    # Defense in depth: skip fetching blocked targets (metadata/loopback/link-local).
     try:
-        async with httpx.AsyncClient(verify=False, timeout=10.0, follow_redirects=True) as hc:
+        validate_host_allowed(srv["host"])
+    except HTTPException:
+        result["error"] = "blocked host"
+        return result
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=10.0, follow_redirects=False) as hc:
             # 1) Live stats (also proves reachability + auth)
             try:
                 r = await hc.get(f"{base}/authentic-theme/stats.cgi?xhr-stats=general", auth=auth)
@@ -380,8 +426,28 @@ async def record_metric(server_id: str, status: dict):
 
 
 # =========================== Auth routes ====================================
+# Lightweight in-memory brute-force throttle for login (per-email, per-process).
+_login_attempts: dict = {}
+_MAX_LOGIN_ATTEMPTS = 5
+_LOGIN_WINDOW = 300  # seconds
+
+
+def _check_login_rate(email: str):
+    now = time.time()
+    attempts = [t for t in _login_attempts.get(email, []) if now - t < _LOGIN_WINDOW]
+    _login_attempts[email] = attempts
+    if len(attempts) >= _MAX_LOGIN_ATTEMPTS:
+        raise HTTPException(429, "Too many login attempts. Please wait a few minutes and try again.")
+
+
+def _record_login_failure(email: str):
+    _login_attempts.setdefault(email, []).append(time.time())
+
+
 @api.post("/auth/register")
 async def register(body: SignupBody):
+    if len(body.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters long")
     existing = await db.users.find_one({"email": body.email.lower()})
     if existing:
         raise HTTPException(400, "An account with this email already exists")
@@ -403,9 +469,13 @@ async def register(body: SignupBody):
 
 @api.post("/auth/login")
 async def login(body: LoginBody):
-    user = await db.users.find_one({"email": body.email.lower()}, {"_id": 0})
+    email = body.email.lower()
+    _check_login_rate(email)
+    user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user or not user.get("password_hash") or not verify_pw(body.password, user["password_hash"]):
+        _record_login_failure(email)
         raise HTTPException(401, "Invalid email or password")
+    _login_attempts.pop(email, None)
     return {"token": make_jwt(user["user_id"]), "user": public_user(user)}
 
 
@@ -478,6 +548,7 @@ def server_public(s: dict) -> dict:
 
 @api.post("/servers")
 async def add_server(body: ServerBody, user: dict = Depends(get_current_user)):
+    validate_host_allowed(body.host)
     srv = {
         "id": str(uuid.uuid4()),
         "user_id": user["user_id"],
@@ -519,6 +590,8 @@ async def update_server(server_id: str, body: ServerUpdateBody, user: dict = Dep
     if not srv:
         raise HTTPException(404, "Server not found")
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "host" in updates:
+        validate_host_allowed(updates["host"])
     if "password" in updates:
         updates["password"] = enc_secret(updates["password"])
     if updates:
@@ -600,8 +673,9 @@ async def clear_alerts(user: dict = Depends(get_current_user)):
 
 # =========================== Push routes ====================================
 @api.post("/register-push", status_code=201)
-async def register_push(body: RegisterPushBody):
-    await register_push_upstream(body.model_dump())
+async def register_push(body: RegisterPushBody, user: dict = Depends(get_current_user)):
+    payload = {"user_id": user["user_id"], "platform": body.platform, "device_token": body.device_token}
+    await register_push_upstream(payload)
     return {"status": "registered"}
 
 
