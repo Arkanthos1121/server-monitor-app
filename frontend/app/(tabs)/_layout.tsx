@@ -16,11 +16,11 @@ export default function TabsLayout() {
           backgroundColor: colors.surfaceSecondary,
           borderTopColor: colors.border,
           borderTopWidth: 1,
-          height: Platform.OS === "ios" ? 88 : 64,
+          height: Platform.OS === "ios" ? 88 : 74,
           paddingTop: 8,
-          paddingBottom: Platform.OS === "ios" ? 30 : 10,
+          paddingBottom: Platform.OS === "ios" ? 30 : 14,
         },
-        tabBarLabelStyle: { fontFamily: fonts.monoMedium, fontSize: 10, letterSpacing: 1 },
+        tabBarLabelStyle: { fontFamily: fonts.monoMedium, fontSize: 10, letterSpacing: 0.5 },
       }}
       screenListeners={{
         tabPress: () => {

@@ -58,3 +58,18 @@ updates and notify. (User asked to pause and check in at ~50 credits.)
 - Webmin has no official REST API; CPU/RAM/updates depend on Authentic Theme being installed and
   reachable. Updates count is best-effort HTML parsing. Online/offline detection is robust.
 - Push notifications & in-app WebView of self-signed panels only fully testable on a real build.
+
+
+## Security & Quality Hardening (2026-07-11, session 3)
+- Security fixes: strong random JWT_SECRET; SSRF guard (blocks loopback/link-local/cloud-metadata/
+  IPv4-mapped-IPv6/multicast/reserved, ALLOWS private LANs by design); authenticated
+  /api/register-push (user_id from token); login brute-force throttle (5/300s -> 429); password
+  min-length 8; Fernet-encrypted Webmin passwords; per-server verify_cert TLS option (default off);
+  generic error strings (no exception leakage).
+- Code-review fixes: global 401 handler -> auto-logout to /login; dashboard/detail/settings
+  error+retry states; concurrent poller (semaphore=10); update-alerts only on count increase;
+  settings controls re-sync from user; per-server toggle rollback on failure.
+- Metrics fallback: modern Authentic Theme stats.cgi returns a websocket handle, so CPU/RAM/load
+  are also scraped from the Running Processes (/proc) module.
+- Testing iteration 2: 28/28 backend + all frontend flows PASSED. Bottom-tab height fixed.
+- Residual: in-memory login throttle is per-process (use shared store when scaling to N workers).
