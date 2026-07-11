@@ -73,3 +73,18 @@ updates and notify. (User asked to pause and check in at ~50 credits.)
   are also scraped from the Running Processes (/proc) module.
 - Testing iteration 2: 28/28 backend + all frontend flows PASSED. Bottom-tab height fixed.
 - Residual: in-memory login throttle is per-process (use shared store when scaling to N workers).
+
+
+## Check Modes + Self-Host Kit (2026-07-11, session 4)
+- Check modes per server: check_mode = "webmin" (HTTP, full metrics + auth_ok detection),
+  "tcp" (port-open via asyncio.open_connection), "ping" (ICMP via ping subprocess; needs NET_RAW +
+  ICMP allowed — blocked in cloud sandbox, works on LAN). Username/password now optional (only
+  required for webmin). Detail hides gauges/history/updates for non-webmin and shows CHECK MODE +
+  AUTH lines; cards show PORT OPEN / PING OK / OFFLINE + an AUTH-FAILED badge for webmin 401s.
+  Verified: TCP 8.8.8.8:53 online, :9 offline; UI selector + card states.
+- Self-host kit at /app/selfhost/ (docker-compose.yml: mongo:7 + inline-Dockerfile backend +
+  NET_RAW; .env.example; README.md): run backend+Mongo on a Raspberry Pi 5 to reach LAN Webmin;
+  Cloudflare Tunnel for remote access; point app via EXPO_PUBLIC_BACKEND_URL.
+- PUSH (support-confirmed): Emergent-managed push is tied to Emergent's build/deploy pipeline and
+  NOT confirmed for a self-hosted backend. Fully self-hosted push = switch to Expo push tokens +
+  Expo push service (FCM/APNs) [next step]. Fixed bottom-tab label clipping.

@@ -11,6 +11,8 @@ export default function ServerCard({ server, onPress }: { server: Server; onPres
   const st = server.last_status;
   const online = !!st?.online;
   const updates = st?.updates ?? null;
+  const isWebmin = server.check_mode === "webmin";
+  const authFailed = isWebmin && online && st?.auth_ok === false;
 
   const handle = () => {
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -46,10 +48,23 @@ export default function ServerCard({ server, onPress }: { server: Server; onPres
       </Text>
 
       {online ? (
-        <View style={styles.metrics}>
-          <MetricRow label="CPU" value={st?.cpu ?? null} />
-          <MetricRow label="RAM" value={st?.ram ?? null} />
-        </View>
+        isWebmin ? (
+          <View style={styles.metrics}>
+            {authFailed && (
+              <View style={styles.authFail}>
+                <Ionicons name="lock-closed" size={11} color={colors.warning} />
+                <Text style={styles.authFailText}>AUTH FAILED</Text>
+              </View>
+            )}
+            <MetricRow label="CPU" value={st?.cpu ?? null} />
+            <MetricRow label="RAM" value={st?.ram ?? null} />
+          </View>
+        ) : (
+          <View style={styles.onlineBox}>
+            <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+            <Text style={styles.onlineText}>{server.check_mode === "ping" ? "PING OK" : "PORT OPEN"}</Text>
+          </View>
+        )
       ) : (
         <View style={styles.offlineBox}>
           <Text style={styles.offlineText}>OFFLINE</Text>
@@ -108,4 +123,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   offlineText: { fontFamily: fonts.monoMedium, fontSize: 12, color: colors.error, letterSpacing: 2 },
+  onlineBox: {
+    marginTop: "auto",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.success,
+    borderRadius: radius.sm,
+    paddingVertical: spacing.sm,
+  },
+  onlineText: { fontFamily: fonts.monoMedium, fontSize: 12, color: colors.success, letterSpacing: 2 },
+  authFail: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 2 },
+  authFailText: { fontFamily: fonts.monoMedium, fontSize: 9, color: colors.warning, letterSpacing: 1 },
 });

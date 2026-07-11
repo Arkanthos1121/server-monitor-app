@@ -22,6 +22,7 @@ export default function AddServer() {
   const [password, setPassword] = useState("");
   const [useSsl, setUseSsl] = useState(true);
   const [verifyCert, setVerifyCert] = useState(false);
+  const [checkMode, setCheckMode] = useState<"webmin" | "tcp" | "ping">("webmin");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -36,25 +37,34 @@ export default function AddServer() {
         setUsername(s.username);
         setUseSsl(s.use_ssl);
         setVerifyCert(s.verify_cert);
+        setCheckMode(s.check_mode);
       } catch {}
     })();
   }, [id, isEdit]);
 
   const save = async () => {
     setError(null);
-    if (!name.trim() || !host.trim() || !username.trim()) {
-      setError("Name, host and username are required");
+    if (!name.trim() || !host.trim()) {
+      setError("Name and host are required");
       return;
     }
-    if (!isEdit && !password) {
-      setError("Password is required");
+    if (checkMode === "webmin" && !isEdit && !password) {
+      setError("Password is required for Webmin checks");
       return;
     }
     setSaving(true);
     try {
       const portNum = parseInt(port, 10) || 10000;
       if (isEdit) {
-        const body: any = { name: name.trim(), host: host.trim(), port: portNum, username: username.trim(), use_ssl: useSsl, verify_cert: verifyCert };
+        const body: any = {
+          name: name.trim(),
+          host: host.trim(),
+          port: portNum,
+          username: username.trim() || "root",
+          use_ssl: useSsl,
+          verify_cert: verifyCert,
+          check_mode: checkMode,
+        };
         if (password) body.password = password;
         await api.put(`/api/servers/${id}`, body);
       } else {
@@ -62,10 +72,11 @@ export default function AddServer() {
           name: name.trim(),
           host: host.trim(),
           port: portNum,
-          username: username.trim(),
+          username: username.trim() || "root",
           password,
           use_ssl: useSsl,
           verify_cert: verifyCert,
+          check_mode: checkMode,
         });
       }
       router.back();
@@ -75,6 +86,13 @@ export default function AddServer() {
       setSaving(false);
     }
   };
+
+  const MODES: { key: "webmin" | "tcp" | "ping"; label: string; hint: string }[] = [
+    { key: "webmin", label: "WEBMIN", hint: "Full HTTP(S) check: online + CPU/RAM + updates" },
+    { key: "tcp", label: "TCP PORT", hint: "Just checks the port is open (fast, no login)" },
+    { key: "ping", label: "PING", hint: "ICMP ping — is the host alive on the network" },
+  ];
+  const modeHint = MODES.find((m) => m.key === checkMode)?.hint || "";
 
   return (
     <View style={styles.root}>
@@ -93,45 +111,70 @@ export default function AddServer() {
       >
         <Field label="DISPLAY NAME" value={name} onChangeText={setName} placeholder="Production DB" autoCapitalize="words" testID="name-input" />
         <Field label="HOST / IP" value={host} onChangeText={setHost} placeholder="192.168.1.10 or srv.domain.com" autoCapitalize="none" keyboardType="url" testID="host-input" />
-        <Field label="PORT" value={port} onChangeText={setPort} placeholder="10000" keyboardType="number-pad" testID="port-input" />
-        <Field label="WEBMIN USERNAME" value={username} onChangeText={setUsername} placeholder="root" autoCapitalize="none" testID="username-input" />
-        <Field
-          label={isEdit ? "PASSWORD (leave blank to keep)" : "WEBMIN PASSWORD"}
-          value={password}
-          onChangeText={setPassword}
-          placeholder="••••••••"
-          secureTextEntry
-          testID="password-input"
-        />
+        <Field label={checkMode === "ping" ? "PORT (unused for ping)" : "PORT"} value={port} onChangeText={setPort} placeholder="10000" keyboardType="number-pad" testID="port-input" />
 
-        <View style={styles.sslRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.sslLabel}>USE HTTPS</Text>
-            <Text style={styles.sslHint}>Webmin uses HTTPS by default (self-signed OK)</Text>
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>CHECK MODE</Text>
+          <View style={styles.segment}>
+            {MODES.map((m) => {
+              const active = checkMode === m.key;
+              return (
+                <Pressable
+                  key={m.key}
+                  testID={`mode-${m.key}`}
+                  onPress={() => setCheckMode(m.key)}
+                  style={[styles.segmentItem, active && styles.segmentItemActive]}
+                >
+                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{m.label}</Text>
+                </Pressable>
+              );
+            })}
           </View>
-          <Switch
-            testID="ssl-toggle"
-            value={useSsl}
-            onValueChange={setUseSsl}
-            trackColor={{ true: colors.brandTertiary, false: colors.surfaceTertiary }}
-            thumbColor={useSsl ? colors.brand : colors.onSurfaceSecondary}
-          />
+          <Text style={styles.sslHint}>{modeHint}</Text>
         </View>
 
-        {useSsl && (
-          <View style={[styles.sslRow, { marginTop: spacing.md }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sslLabel}>VERIFY TLS CERTIFICATE</Text>
-              <Text style={styles.sslHint}>Enable only if this server has a valid (non-self-signed) cert</Text>
-            </View>
-            <Switch
-              testID="verify-cert-toggle"
-              value={verifyCert}
-              onValueChange={setVerifyCert}
-              trackColor={{ true: colors.brandTertiary, false: colors.surfaceTertiary }}
-              thumbColor={verifyCert ? colors.brand : colors.onSurfaceSecondary}
+        {checkMode === "webmin" && (
+          <>
+            <Field label="WEBMIN USERNAME" value={username} onChangeText={setUsername} placeholder="root" autoCapitalize="none" testID="username-input" />
+            <Field
+              label={isEdit ? "PASSWORD (leave blank to keep)" : "WEBMIN PASSWORD"}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="••••••••"
+              secureTextEntry
+              testID="password-input"
             />
-          </View>
+
+            <View style={styles.sslRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sslLabel}>USE HTTPS</Text>
+                <Text style={styles.sslHint}>Webmin uses HTTPS by default (self-signed OK)</Text>
+              </View>
+              <Switch
+                testID="ssl-toggle"
+                value={useSsl}
+                onValueChange={setUseSsl}
+                trackColor={{ true: colors.brandTertiary, false: colors.surfaceTertiary }}
+                thumbColor={useSsl ? colors.brand : colors.onSurfaceSecondary}
+              />
+            </View>
+
+            {useSsl && (
+              <View style={[styles.sslRow, { marginTop: spacing.md }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sslLabel}>VERIFY TLS CERTIFICATE</Text>
+                  <Text style={styles.sslHint}>Enable only if this server has a valid (non-self-signed) cert</Text>
+                </View>
+                <Switch
+                  testID="verify-cert-toggle"
+                  value={verifyCert}
+                  onValueChange={setVerifyCert}
+                  trackColor={{ true: colors.brandTertiary, false: colors.surfaceTertiary }}
+                  thumbColor={verifyCert ? colors.brand : colors.onSurfaceSecondary}
+                />
+              </View>
+            )}
+          </>
         )}
 
         {error ? (
@@ -197,6 +240,11 @@ const styles = StyleSheet.create({
   sslRow: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md },
   sslLabel: { fontFamily: fonts.monoMedium, fontSize: 12, color: colors.onSurface, letterSpacing: 1 },
   sslHint: { fontFamily: fonts.body, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
+  segment: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm },
+  segmentItem: { flex: 1, paddingVertical: spacing.sm, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, alignItems: "center" },
+  segmentItemActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  segmentText: { fontFamily: fonts.monoMedium, fontSize: 11, color: colors.onSurfaceSecondary, letterSpacing: 0.5 },
+  segmentTextActive: { color: colors.onBrand },
   error: { fontFamily: fonts.mono, fontSize: 12, color: colors.error, marginTop: spacing.sm },
   sticky: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
 });

@@ -83,10 +83,11 @@ class ServerBody(BaseModel):
     name: str
     host: str
     port: int = 10000
-    username: str
-    password: str
+    username: str = "root"
+    password: Optional[str] = None
     use_ssl: bool = True
     verify_cert: bool = False
+    check_mode: str = "webmin"  # "webmin" | "tcp" | "ping"
 
 
 class ServerUpdateBody(BaseModel):
@@ -97,6 +98,7 @@ class ServerUpdateBody(BaseModel):
     password: Optional[str] = None
     use_ssl: Optional[bool] = None
     verify_cert: Optional[bool] = None
+    check_mode: Optional[str] = None
     alerts_enabled: Optional[bool] = None
 
 
@@ -282,27 +284,74 @@ def validate_host_allowed(host: str) -> None:
             raise HTTPException(400, "Host is not allowed (loopback/link-local/metadata addresses are blocked).")
 
 
+async def tcp_check(host: str, port: int, timeout: float = 5.0) -> bool:
+    try:
+        fut = asyncio.open_connection(host, port)
+        reader, writer = await asyncio.wait_for(fut, timeout=timeout)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+async def ping_check(host: str, timeout: int = 3) -> bool:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ping", "-c", "1", "-W", str(timeout), host,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        rc = await asyncio.wait_for(proc.wait(), timeout=timeout + 2)
+        return rc == 0
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return False
+
+
 async def check_server(srv: dict) -> dict:
     scheme = "https" if srv.get("use_ssl", True) else "http"
-    base = f"{scheme}://{srv['host']}:{srv['port']}"
-    auth = (srv["username"], dec_secret(srv["password"]))
+    host = srv["host"]
+    port = srv["port"]
+    base = f"{scheme}://{host}:{port}"
+    auth = (srv.get("username") or "", dec_secret(srv.get("password") or ""))
+    mode = srv.get("check_mode", "webmin")
     result = {
         "online": False,
         "cpu": None, "ram": None, "disk": None, "load": None, "uptime": None,
-        "updates": None, "error": None, "checked_at": now_utc().isoformat(),
+        "updates": None, "auth_ok": None, "error": None, "checked_at": now_utc().isoformat(),
     }
     # Defense in depth: skip fetching blocked targets (metadata/loopback/link-local).
     try:
-        validate_host_allowed(srv["host"])
+        validate_host_allowed(host)
     except HTTPException:
         result["error"] = "blocked host"
         return result
+
+    # Lightweight modes: TCP port open, or ICMP ping.
+    if mode == "ping":
+        result["online"] = await ping_check(host)
+        if not result["online"]:
+            result["error"] = "no ping reply"
+        return result
+    if mode == "tcp":
+        result["online"] = await tcp_check(host, port)
+        if not result["online"]:
+            result["error"] = "port closed"
+        return result
+
     try:
         async with httpx.AsyncClient(verify=srv.get("verify_cert", False), timeout=10.0, follow_redirects=False) as hc:
             # 1) Live stats (also proves reachability + auth)
             try:
                 r = await hc.get(f"{base}/authentic-theme/stats.cgi?xhr-stats=general", auth=auth)
                 result["online"] = True
+                result["auth_ok"] = r.status_code != 401
                 if r.status_code == 200:
                     try:
                         result.update(_parse_stats(r.json()))
@@ -602,6 +651,7 @@ def server_public(s: dict) -> dict:
         "username": s["username"],
         "use_ssl": s.get("use_ssl", True),
         "verify_cert": s.get("verify_cert", False),
+        "check_mode": s.get("check_mode", "webmin"),
         "webmin_url": f"{'https' if s.get('use_ssl', True) else 'http'}://{s['host']}:{s['port']}/",
         "alerts_enabled": s.get("alerts_enabled", True),
         "last_status": s.get("last_status"),
@@ -619,9 +669,10 @@ async def add_server(body: ServerBody, user: dict = Depends(get_current_user)):
         "host": body.host,
         "port": body.port,
         "username": body.username,
-        "password": enc_secret(body.password),
+        "password": enc_secret(body.password or ""),
         "use_ssl": body.use_ssl,
         "verify_cert": body.verify_cert,
+        "check_mode": body.check_mode,
         "alerts_enabled": True,
         "last_status": None,
         "created_at": now_utc().isoformat(),

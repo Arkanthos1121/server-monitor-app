@@ -125,6 +125,8 @@ export default function ServerDetail() {
   const st = server.last_status;
   const online = !!st?.online;
   const updates = st?.updates ?? null;
+  const isWebmin = server.check_mode === "webmin";
+  const modeLabel = server.check_mode === "ping" ? "PING (ICMP)" : server.check_mode === "tcp" ? "TCP PORT" : "WEBMIN HTTP";
 
   return (
     <View style={styles.root}>
@@ -165,16 +167,26 @@ export default function ServerDetail() {
           </View>
         )}
 
-        {/* Gauges */}
-        <View style={styles.gauges}>
-          <Gauge value={online ? st?.cpu ?? null : null} label="CPU" testID="cpu-gauge" />
-          <Gauge value={online ? st?.ram ?? null : null} label="RAM" testID="ram-gauge" />
-          <Gauge value={online ? st?.disk ?? null : null} label="DISK" testID="disk-gauge" />
-        </View>
+        {/* Gauges (Webmin mode only) */}
+        {isWebmin && (
+          <View style={styles.gauges}>
+            <Gauge value={online ? st?.cpu ?? null : null} label="CPU" testID="cpu-gauge" />
+            <Gauge value={online ? st?.ram ?? null : null} label="RAM" testID="ram-gauge" />
+            <Gauge value={online ? st?.disk ?? null : null} label="DISK" testID="disk-gauge" />
+          </View>
+        )}
 
         {/* Telemetry */}
         <View style={styles.infoCard}>
           <InfoLine label="STATUS" value={online ? "ONLINE" : "OFFLINE"} color={online ? colors.success : colors.error} />
+          <InfoLine label="CHECK MODE" value={modeLabel} />
+          {isWebmin && (
+            <InfoLine
+              label="AUTH"
+              value={!online ? "—" : st?.auth_ok === false ? "FAILED" : st?.auth_ok ? "OK" : "—"}
+              color={st?.auth_ok === false ? colors.warning : st?.auth_ok ? colors.success : undefined}
+            />
+          )}
           <InfoLine label="UPTIME" value={st?.uptime || "—"} />
           <InfoLine
             label="LOAD AVG"
@@ -183,31 +195,35 @@ export default function ServerDetail() {
           <InfoLine label="LAST CHECK" value={st?.checked_at ? new Date(st.checked_at).toLocaleTimeString() : "—"} />
         </View>
 
-        {/* Telemetry history */}
-        <Text style={styles.sectionTitle}>TELEMETRY HISTORY</Text>
-        <View style={styles.historyCard}>
-          <Sparkline
-            label="CPU %"
-            color={colors.brand}
-            data={history.map((h) => h.cpu)}
-            latest={online ? st?.cpu ?? null : null}
-            width={width - spacing.lg * 2 - spacing.md * 2}
-            testID="cpu-sparkline"
-          />
-          <Sparkline
-            label="RAM %"
-            color={colors.warning}
-            data={history.map((h) => h.ram)}
-            latest={online ? st?.ram ?? null : null}
-            width={width - spacing.lg * 2 - spacing.md * 2}
-            testID="ram-sparkline"
-          />
-          <Text style={styles.historyHint}>
-            {history.length >= 2
-              ? `${history.length} samples · captured on each check`
-              : "History builds up as the server is polled over time."}
-          </Text>
-        </View>
+        {/* Telemetry history (Webmin mode only) */}
+        {isWebmin && (
+          <>
+            <Text style={styles.sectionTitle}>TELEMETRY HISTORY</Text>
+            <View style={styles.historyCard}>
+              <Sparkline
+                label="CPU %"
+                color={colors.brand}
+                data={history.map((h) => h.cpu)}
+                latest={online ? st?.cpu ?? null : null}
+                width={width - spacing.lg * 2 - spacing.md * 2}
+                testID="cpu-sparkline"
+              />
+              <Sparkline
+                label="RAM %"
+                color={colors.warning}
+                data={history.map((h) => h.ram)}
+                latest={online ? st?.ram ?? null : null}
+                width={width - spacing.lg * 2 - spacing.md * 2}
+                testID="ram-sparkline"
+              />
+              <Text style={styles.historyHint}>
+                {history.length >= 2
+                  ? `${history.length} samples · captured on each check`
+                  : "History builds up as the server is polled over time."}
+              </Text>
+            </View>
+          </>
+        )}
 
         {/* Per-server alerts */}
         <View style={styles.alertToggleRow}>
@@ -224,25 +240,29 @@ export default function ServerDetail() {
           />
         </View>
 
-        {/* Updates */}
-        <Text style={styles.sectionTitle}>PACKAGE UPDATES</Text>
-        <View style={styles.updatesCard}>
-          {updates == null ? (
-            <Text style={styles.updatesText}>Update status unavailable for this node.</Text>
-          ) : updates === 0 ? (
-            <View style={styles.updatesRow}>
-              <Ionicons name="checkmark-circle" size={18} color={colors.success} />
-              <Text style={[styles.updatesText, { color: colors.success }]}>All packages up to date</Text>
+        {/* Updates (Webmin mode only) */}
+        {isWebmin && (
+          <>
+            <Text style={styles.sectionTitle}>PACKAGE UPDATES</Text>
+            <View style={styles.updatesCard}>
+              {updates == null ? (
+                <Text style={styles.updatesText}>Update status unavailable for this node.</Text>
+              ) : updates === 0 ? (
+                <View style={styles.updatesRow}>
+                  <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+                  <Text style={[styles.updatesText, { color: colors.success }]}>All packages up to date</Text>
+                </View>
+              ) : (
+                <View style={styles.updatesRow}>
+                  <Ionicons name="arrow-up-circle" size={18} color={colors.warning} />
+                  <Text style={[styles.updatesText, { color: colors.warning }]}>
+                    {updates} package update{updates > 1 ? "s" : ""} available
+                  </Text>
+                </View>
+              )}
             </View>
-          ) : (
-            <View style={styles.updatesRow}>
-              <Ionicons name="arrow-up-circle" size={18} color={colors.warning} />
-              <Text style={[styles.updatesText, { color: colors.warning }]}>
-                {updates} package update{updates > 1 ? "s" : ""} available
-              </Text>
-            </View>
-          )}
-        </View>
+          </>
+        )}
       </ScrollView>
 
       {/* Sticky open webmin */}

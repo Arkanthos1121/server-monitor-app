@@ -1,0 +1,36 @@
+# WebminPulse self-host stack (Raspberry Pi 5 / any 64-bit Linux)
+# Run from this folder:  docker compose up -d --build
+# Requires: 64-bit OS + Docker + Docker Compose v2 (2.17+ for dockerfile_inline).
+
+services:
+  mongo:
+    image: mongo:7            # Pi 5 (ARMv8.2) supports Mongo 7; on a Pi 3/4 use mongo:4.4
+    container_name: wp-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db   # store DB on your NVMe (this volume lives on the host disk)
+
+  backend:
+    container_name: wp-backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    build:
+      context: ../backend     # uses your repo's backend/server.py
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping \
+            && rm -rf /var/lib/apt/lists/*
+        WORKDIR /app
+        RUN pip install --no-cache-dir fastapi "uvicorn[standard]" motor pymongo \
+            "pydantic[email]" python-dotenv httpx bcrypt pyjwt cryptography
+        COPY server.py .
+        CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]
+    env_file: .env
+    ports:
+      - "8001:8001"
+    cap_add:
+      - NET_RAW               # allows ICMP "ping" check mode inside the container
+
+volumes:
+  mongo_data:

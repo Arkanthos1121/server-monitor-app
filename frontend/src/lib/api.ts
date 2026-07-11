@@ -73,6 +73,7 @@ export type ServerStatus = {
   load: (number | null)[] | null;
   uptime: string | null;
   updates: number | null;
+  auth_ok: boolean | null;
   error: string | null;
   checked_at: string;
 };
@@ -85,6 +86,7 @@ export type Server = {
   username: string;
   use_ssl: boolean;
   verify_cert: boolean;
+  check_mode: "webmin" | "tcp" | "ping";
   webmin_url: string;
   alerts_enabled: boolean;
   last_status: ServerStatus | null;
