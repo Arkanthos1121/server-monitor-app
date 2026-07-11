@@ -33,6 +33,7 @@ export default function ServerDetail() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -42,7 +43,9 @@ export default function ServerDetail() {
       ]);
       setServer(s);
       setHistory(h);
+      setLoadError(false);
     } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -73,7 +76,10 @@ export default function ServerDetail() {
     setServer((prev) => (prev ? { ...prev, alerts_enabled: val } : prev));
     try {
       await api.put(`/api/servers/${id}`, { alerts_enabled: val });
-    } catch {}
+    } catch {
+      // rollback on failure
+      setServer((prev) => (prev ? { ...prev, alerts_enabled: !val } : prev));
+    }
   }, [id]);
 
   const openWebmin = () => {
@@ -90,10 +96,28 @@ export default function ServerDetail() {
     } catch {}
   };
 
-  if (loading || !server) {
+  if (loading) {
     return (
       <View style={styles.centerFill}>
         <ActivityIndicator color={colors.brand} />
+      </View>
+    );
+  }
+
+  if (!server) {
+    return (
+      <View style={styles.centerFill} testID="detail-error">
+        <Ionicons name="cloud-offline-outline" size={56} color={colors.error} />
+        <Text style={[styles.title, { textAlign: "center", marginTop: spacing.lg }]}>COULD NOT LOAD NODE</Text>
+        <Text style={{ fontFamily: fonts.body, color: colors.onSurfaceSecondary, textAlign: "center", marginTop: spacing.sm, paddingHorizontal: spacing.xl }}>
+          {loadError ? "The service is unreachable. Check your connection and retry." : "This server no longer exists."}
+        </Text>
+        <View style={{ flexDirection: "row", gap: spacing.md, marginTop: spacing.xl }}>
+          <NeonButton title="Back" variant="outline" onPress={() => router.back()} testID="detail-back" />
+          {loadError && (
+            <NeonButton title="Retry" onPress={() => { setLoading(true); load(); }} testID="detail-retry" />
+          )}
+        </View>
       </View>
     );
   }

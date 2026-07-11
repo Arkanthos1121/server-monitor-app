@@ -21,6 +21,12 @@ export class ApiError extends Error {
   }
 }
 
+// Global 401 handler — set by AuthContext so expired tokens log the user out.
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  onUnauthorized = fn;
+}
+
 async function request<T = any>(method: string, path: string, body?: any): Promise<T> {
   const token = await getToken();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -41,6 +47,10 @@ async function request<T = any>(method: string, path: string, body?: any): Promi
   }
 
   if (!res.ok) {
+    // Auth expired/invalid: trigger global logout (but not for the login/auth calls themselves).
+    if (res.status === 401 && onUnauthorized && !path.startsWith("/api/auth/")) {
+      onUnauthorized();
+    }
     const detail = (data && (data.detail || data.message)) || `Request failed (${res.status})`;
     throw new ApiError(typeof detail === "string" ? detail : "Request failed", res.status);
   }

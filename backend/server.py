@@ -299,9 +299,25 @@ async def check_server(srv: dict) -> dict:
                         result.update(_parse_stats(r.json()))
                     except Exception:
                         pass
-            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as e:
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout):
                 result["error"] = "unreachable"
                 return result
+
+            # 1b) Fallback: modern Authentic Theme returns a websocket handle (not metrics)
+            #     from stats.cgi, so scrape the Running Processes module for CPU/RAM/load.
+            if result["cpu"] is None and result["ram"] is None:
+                for path in ("/proc/index.cgi", "/proc/"):
+                    try:
+                        rp = await hc.get(f"{base}{path}", auth=auth)
+                        if rp.status_code == 200:
+                            parsed = _parse_proc_html(rp.text)
+                            for k, v in parsed.items():
+                                if v is not None and result.get(k) is None:
+                                    result[k] = v
+                            if parsed.get("cpu") is not None or parsed.get("ram") is not None:
+                                break
+                    except Exception:
+                        pass
 
             # 2) Available package updates (best effort)
             try:
@@ -313,6 +329,43 @@ async def check_server(srv: dict) -> dict:
     except Exception as e:
         result["error"] = str(e)[:200]
     return result
+
+
+_UNIT_BYTES = {"b": 1, "kb": 1024, "kib": 1024, "mb": 1024**2, "mib": 1024**2,
+               "gb": 1024**3, "gib": 1024**3, "tb": 1024**4, "tib": 1024**4}
+
+
+def _to_bytes(num: str, unit: str):
+    try:
+        return float(num) * _UNIT_BYTES.get(unit.lower(), 1)
+    except Exception:
+        return None
+
+
+def _parse_proc_html(html: str) -> dict:
+    """Best-effort scrape of Webmin 'Running Processes' (proc) module for CPU/RAM/load."""
+    out = {"cpu": None, "ram": None, "load": None}
+    try:
+        text = re.sub(r"<[^>]+>", " ", html)  # strip tags
+        text = re.sub(r"\s+", " ", text)
+        # Load averages: three floats after "load average(s)"
+        m = re.search(r"load average[s]?.*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+\.\d+)", text, re.I)
+        if m:
+            out["load"] = [float(m.group(1)), float(m.group(2)), float(m.group(3))]
+        # CPU: "... N% idle" -> used = 100 - idle
+        m = re.search(r"([\d.]+)\s*%\s*idle", text, re.I)
+        if m:
+            out["cpu"] = round(max(0.0, min(100.0, 100.0 - float(m.group(1)))), 1)
+        # Real memory: "Real memory X UNIT total, Y UNIT used"
+        m = re.search(r"[Rr]eal memory[^\d]*([\d.]+)\s*([KMGT]i?B)\s*total[^\d]*([\d.]+)\s*([KMGT]i?B)\s*used", text)
+        if m:
+            total = _to_bytes(m.group(1), m.group(2))
+            used = _to_bytes(m.group(3), m.group(4))
+            if total and used is not None and total > 0:
+                out["ram"] = round(max(0.0, min(100.0, used / total * 100.0)), 1)
+    except Exception:
+        pass
+    return out
 
 
 def _count_updates(html: str) -> Optional[int]:
@@ -403,7 +456,7 @@ async def evaluate_and_alert(user: dict, server: dict, status: dict):
         if ram is not None and ram >= ram_t and (prev.get("ram") is None or prev.get("ram") < ram_t):
             await create_alert(user["user_id"], server, "ram", f"RAM usage high: {ram}% (>{ram_t}%).", "warning")
         upd = status.get("updates")
-        if upd and upd > 0 and (prev.get("updates") or 0) != upd:
+        if upd and upd > 0 and upd > (prev.get("updates") or 0):
             await create_alert(user["user_id"], server, "updates", f"{upd} package update(s) available.", "info")
 
 
@@ -682,11 +735,20 @@ async def register_push(body: RegisterPushBody, user: dict = Depends(get_current
 # =========================== Background poller ===============================
 async def poller_loop():
     await asyncio.sleep(20)
+    sem = asyncio.Semaphore(10)
+
+    async def _process(user: dict, srv: dict):
+        async with sem:
+            status = await check_server(srv)
+            await evaluate_and_alert(user, srv, status)
+            await record_metric(srv["id"], status)
+            await db.servers.update_one({"id": srv["id"]}, {"$set": {"last_status": status}})
+
     while True:
         try:
             servers = await db.servers.find({}, {"_id": 0}).to_list(2000)
             users_cache: dict = {}
-            checked = 0
+            due_pairs = []
             for srv in servers:
                 uid = srv["user_id"]
                 if uid not in users_cache:
@@ -705,13 +767,11 @@ async def poller_loop():
                         due = (now_utc() - lt).total_seconds() >= interval_min * 60
                     except Exception:
                         due = True
-                if not due:
-                    continue
-                status = await check_server(srv)
-                await evaluate_and_alert(user, srv, status)
-                await record_metric(srv["id"], status)
-                await db.servers.update_one({"id": srv["id"]}, {"$set": {"last_status": status}})
-                checked += 1
+                if due:
+                    due_pairs.append((user, srv))
+            if due_pairs:
+                await asyncio.gather(*[_process(u, s) for u, s in due_pairs], return_exceptions=True)
+            checked = len(due_pairs)
             if checked:
                 logger.info(f"Poller cycle: {checked} servers checked")
         except Exception as e:

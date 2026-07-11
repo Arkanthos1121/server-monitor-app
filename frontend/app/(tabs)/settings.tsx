@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, Switch, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -34,10 +34,21 @@ export default function Settings() {
   const [pollInterval, setPollInterval] = useState(user?.poll_interval_minutes ?? 30);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+
+  // Keep local controls in sync if the user object loads/changes after mount.
+  useEffect(() => {
+    if (!user) return;
+    setCpu(user.cpu_threshold);
+    setRam(user.ram_threshold);
+    setAlertsEnabled(user.alerts_enabled);
+    setPollInterval(user.poll_interval_minutes);
+  }, [user]);
 
   const save = async () => {
     setSaving(true);
     setSaved(false);
+    setSaveError(false);
     try {
       await api.put<User>("/api/settings", {
         cpu_threshold: cpu,
@@ -48,6 +59,7 @@ export default function Settings() {
       await refreshUser();
       setSaved(true);
     } catch {
+      setSaveError(true);
     } finally {
       setSaving(false);
     }
@@ -125,6 +137,11 @@ export default function Settings() {
       </View>
 
       <NeonButton title={saved ? "Saved ✓" : "Save Settings"} onPress={save} loading={saving} testID="save-settings-button" style={{ marginTop: spacing.lg }} />
+      {saveError ? (
+        <Text style={styles.saveError} testID="settings-save-error">
+          {"> "}Could not save settings. Check your connection and try again.
+        </Text>
+      ) : null}
 
       <Pressable style={styles.logout} onPress={logout} testID="logout-button">
         <Ionicons name="log-out-outline" size={18} color={colors.error} />
@@ -170,4 +187,5 @@ const styles = StyleSheet.create({
   logout: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, marginTop: spacing.xl, paddingVertical: spacing.md, borderWidth: 1, borderColor: colors.error, borderRadius: radius.md },
   logoutText: { fontFamily: fonts.monoMedium, fontSize: 13, color: colors.error, letterSpacing: 1 },
   version: { fontFamily: fonts.mono, fontSize: 11, color: colors.onSurfaceSecondary, textAlign: "center", marginTop: spacing.xl },
+  saveError: { fontFamily: fonts.mono, fontSize: 12, color: colors.error, marginTop: spacing.sm },
 });

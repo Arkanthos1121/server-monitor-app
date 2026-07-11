@@ -26,12 +26,15 @@ export default function Dashboard() {
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const data = await api.get<Server[]>("/api/servers");
       setServers(data);
+      setError(false);
     } catch {
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -81,6 +84,16 @@ export default function Dashboard() {
       {loading ? (
         <View style={styles.centerFill}>
           <ActivityIndicator color={colors.brand} />
+        </View>
+      ) : error && total === 0 ? (
+        <View style={styles.centerFill} testID="dashboard-error">
+          <Ionicons name="cloud-offline-outline" size={64} color={colors.error} />
+          <Text style={styles.emptyTitle}>CONNECTION FAILED</Text>
+          <Text style={styles.emptySub}>Could not reach the WebminPulse service. Check your connection and retry.</Text>
+          <Pressable style={styles.emptyBtn} onPress={() => { setLoading(true); load(); }} testID="dashboard-retry">
+            <Ionicons name="refresh" size={18} color={colors.onBrand} />
+            <Text style={styles.emptyBtnText}>RETRY</Text>
+          </Pressable>
         </View>
       ) : total === 0 ? (
         <View style={styles.centerFill} testID="empty-state">

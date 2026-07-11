@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { Platform } from "react-native";
+import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 
-import { api, setToken, clearToken, getToken, User } from "@/src/lib/api";
+import { api, setToken, clearToken, getToken, setUnauthorizedHandler, User } from "@/src/lib/api";
 type AuthState = {
   user: User | null;
   loading: boolean;
@@ -44,12 +45,23 @@ async function registerForPush(userId: string) {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   const finishAuth = useCallback(async (token: string, u: User) => {
     await setToken(token);
     setUser(u);
     registerForPush(u.user_id);
   }, []);
+
+  // Global 401 handler: expired/invalid token -> log out and route to login.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      clearToken();
+      setUser(null);
+      router.replace("/login");
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [router]);
 
   const bootstrap = useCallback(async () => {
     setLoading(true);
