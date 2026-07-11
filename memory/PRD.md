@@ -88,3 +88,13 @@ updates and notify. (User asked to pause and check in at ~50 credits.)
 - PUSH (support-confirmed): Emergent-managed push is tied to Emergent's build/deploy pipeline and
   NOT confirmed for a self-hosted backend. Fully self-hosted push = switch to Expo push tokens +
   Expo push service (FCM/APNs) [next step]. Fixed bottom-tab label clipping.
+## Code Review Fixes (2026-07-11, session 5)
+- MEDIUM fixed: (1) POLL_INTERVAL_SECONDS now seeds DEFAULT_POLL_MIN used for new-user default +
+  poller fallback (env knob is effective); (2) /api/servers/check-all now bounded by
+  Semaphore(10) like the poller; (3) PUT /api/servers/{id} now re-checks immediately
+  (check_server + evaluate + record_metric) so a corrected server updates right away.
+- LOW fixed: server-side check_mode validation (400 on invalid); Settings "Saved ✓" resets when a
+  control changes; add-form requires password when switching a node INTO webmin mode (even on edit);
+  detail offline banner is now mode-aware (ping/tcp/webmin). Verified via curl + UI screenshot.
+- Residual (accepted): in-memory login throttle is per-process; CORS wildcard (security-only);
+  webmin auth_ok=status!=401 may not catch 200-login-page auth failures (fleet-dependent).

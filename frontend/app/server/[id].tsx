@@ -163,7 +163,13 @@ export default function ServerDetail() {
         {!online && (
           <View style={styles.offlineBanner} testID="offline-banner">
             <Ionicons name="warning" size={20} color={colors.error} />
-            <Text style={styles.offlineText}>NODE UNREACHABLE — server is offline or credentials/port are wrong.</Text>
+            <Text style={styles.offlineText}>
+              {server.check_mode === "ping"
+                ? "NO PING REPLY — the host isn't responding to ICMP on the network."
+                : server.check_mode === "tcp"
+                ? `PORT CLOSED — nothing is listening on ${server.host}:${server.port}.`
+                : "NODE UNREACHABLE — Webmin is offline or the host/port is wrong."}
+            </Text>
           </View>
         )}
 

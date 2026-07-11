@@ -96,15 +96,15 @@ export default function Settings() {
           <Switch
             testID="alerts-toggle"
             value={alertsEnabled}
-            onValueChange={setAlertsEnabled}
+            onValueChange={(v) => { setAlertsEnabled(v); setSaved(false); }}
             trackColor={{ true: colors.brandTertiary, false: colors.surfaceTertiary }}
             thumbColor={alertsEnabled ? colors.brand : colors.onSurfaceSecondary}
           />
         </View>
         <View style={styles.hr} />
-        <Stepper label="CPU" value={cpu} onChange={setCpu} />
+        <Stepper label="CPU" value={cpu} onChange={(v) => { setCpu(v); setSaved(false); }} />
         <View style={styles.hr} />
-        <Stepper label="RAM" value={ram} onChange={setRam} />
+        <Stepper label="RAM" value={ram} onChange={(v) => { setRam(v); setSaved(false); }} />
       </View>
 
       <Text style={styles.sectionTitle}>MONITORING</Text>
@@ -120,7 +120,7 @@ export default function Settings() {
               <Pressable
                 key={opt}
                 testID={`poll-${opt}`}
-                onPress={() => setPollInterval(opt)}
+                onPress={() => { setPollInterval(opt); setSaved(false); }}
                 style={[styles.segmentItem, active && styles.segmentItemActive]}
               >
                 <Text style={[styles.segmentText, active && styles.segmentTextActive]}>

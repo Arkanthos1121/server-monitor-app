@@ -23,6 +23,7 @@ export default function AddServer() {
   const [useSsl, setUseSsl] = useState(true);
   const [verifyCert, setVerifyCert] = useState(false);
   const [checkMode, setCheckMode] = useState<"webmin" | "tcp" | "ping">("webmin");
+  const [origMode, setOrigMode] = useState<"webmin" | "tcp" | "ping" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -38,6 +39,7 @@ export default function AddServer() {
         setUseSsl(s.use_ssl);
         setVerifyCert(s.verify_cert);
         setCheckMode(s.check_mode);
+        setOrigMode(s.check_mode);
       } catch {}
     })();
   }, [id, isEdit]);
@@ -48,7 +50,7 @@ export default function AddServer() {
       setError("Name and host are required");
       return;
     }
-    if (checkMode === "webmin" && !isEdit && !password) {
+    if (checkMode === "webmin" && !password && (!isEdit || origMode !== "webmin")) {
       setError("Password is required for Webmin checks");
       return;
     }

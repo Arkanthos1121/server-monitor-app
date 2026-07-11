@@ -32,6 +32,10 @@ db = client[os.environ["DB_NAME"]]
 
 JWT_SECRET = os.environ["JWT_SECRET"]
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "1800"))
+# Default per-user check cadence (minutes), seeded from POLL_INTERVAL_SECONDS so the
+# self-host env knob actually takes effect for new accounts / users without a preference.
+DEFAULT_POLL_MIN = max(1, POLL_INTERVAL // 60)
+VALID_CHECK_MODES = ("webmin", "tcp", "ping")
 
 # Encryption for stored Webmin passwords (at rest)
 _fernet = Fernet(os.environ["SERVER_ENC_KEY"].encode())
@@ -141,7 +145,7 @@ def public_user(u: dict) -> dict:
         "cpu_threshold": u.get("cpu_threshold", 85),
         "ram_threshold": u.get("ram_threshold", 85),
         "alerts_enabled": u.get("alerts_enabled", True),
-        "poll_interval_minutes": u.get("poll_interval_minutes", 30),
+        "poll_interval_minutes": u.get("poll_interval_minutes", DEFAULT_POLL_MIN),
     }
 
 
@@ -571,7 +575,7 @@ async def register(body: SignupBody):
         "cpu_threshold": 85,
         "ram_threshold": 85,
         "alerts_enabled": True,
-        "poll_interval_minutes": 30,
+        "poll_interval_minutes": DEFAULT_POLL_MIN,
         "created_at": now_utc().isoformat(),
     }
     await db.users.insert_one(dict(user))
@@ -609,7 +613,7 @@ async def google_login(body: GoogleBody):
             "cpu_threshold": 85,
             "ram_threshold": 85,
             "alerts_enabled": True,
-            "poll_interval_minutes": 30,
+            "poll_interval_minutes": DEFAULT_POLL_MIN,
             "created_at": now_utc().isoformat(),
         }
         await db.users.insert_one(dict(user))
@@ -662,6 +666,8 @@ def server_public(s: dict) -> dict:
 @api.post("/servers")
 async def add_server(body: ServerBody, user: dict = Depends(get_current_user)):
     validate_host_allowed(body.host)
+    if body.check_mode not in VALID_CHECK_MODES:
+        raise HTTPException(400, f"check_mode must be one of {VALID_CHECK_MODES}")
     srv = {
         "id": str(uuid.uuid4()),
         "user_id": user["user_id"],
@@ -707,10 +713,18 @@ async def update_server(server_id: str, body: ServerUpdateBody, user: dict = Dep
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if "host" in updates:
         validate_host_allowed(updates["host"])
+    if "check_mode" in updates and updates["check_mode"] not in VALID_CHECK_MODES:
+        raise HTTPException(400, f"check_mode must be one of {VALID_CHECK_MODES}")
     if "password" in updates:
         updates["password"] = enc_secret(updates["password"])
     if updates:
         await db.servers.update_one({"id": server_id}, {"$set": updates})
+    # Re-check immediately so a corrected server reflects its new status right away.
+    fresh = await db.servers.find_one({"id": server_id}, {"_id": 0})
+    status = await check_server(fresh)
+    await evaluate_and_alert(user, fresh, status)
+    await record_metric(server_id, status)
+    await db.servers.update_one({"id": server_id}, {"$set": {"last_status": status}})
     fresh = await db.servers.find_one({"id": server_id}, {"_id": 0})
     return server_public(fresh)
 
@@ -740,12 +754,14 @@ async def check_one(server_id: str, user: dict = Depends(get_current_user)):
 @api.post("/servers/check-all")
 async def check_all(user: dict = Depends(get_current_user)):
     servers = await db.servers.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(500)
+    sem = asyncio.Semaphore(10)
 
     async def _run(srv):
-        status = await check_server(srv)
-        await evaluate_and_alert(user, srv, status)
-        await record_metric(srv["id"], status)
-        await db.servers.update_one({"id": srv["id"]}, {"$set": {"last_status": status}})
+        async with sem:
+            status = await check_server(srv)
+            await evaluate_and_alert(user, srv, status)
+            await record_metric(srv["id"], status)
+            await db.servers.update_one({"id": srv["id"]}, {"$set": {"last_status": status}})
 
     await asyncio.gather(*[_run(s) for s in servers], return_exceptions=True)
     fresh = await db.servers.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(500)
@@ -818,7 +834,7 @@ async def poller_loop():
                 user = users_cache[uid]
                 if not user:
                     continue
-                interval_min = user.get("poll_interval_minutes", 30)
+                interval_min = user.get("poll_interval_minutes", DEFAULT_POLL_MIN)
                 last = (srv.get("last_status") or {}).get("checked_at")
                 due = True
                 if last:
