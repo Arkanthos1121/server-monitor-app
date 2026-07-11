@@ -86,6 +86,7 @@ class ServerBody(BaseModel):
     username: str
     password: str
     use_ssl: bool = True
+    verify_cert: bool = False
 
 
 class ServerUpdateBody(BaseModel):
@@ -95,6 +96,7 @@ class ServerUpdateBody(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     use_ssl: Optional[bool] = None
+    verify_cert: Optional[bool] = None
     alerts_enabled: Optional[bool] = None
 
 
@@ -254,6 +256,13 @@ def _ip_is_blocked(ip_str: str) -> bool:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
         return False
+    # Normalize IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254) to its IPv4 form.
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    # Block loopback, link-local (incl. cloud metadata 169.254.169.254), unspecified,
+    # multicast and reserved. Private RFC1918 LANs remain allowed (core use case).
+    if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast or ip.is_reserved:
+        return True
     return any(ip in net for net in _BLOCKED_NETWORKS)
 
 
@@ -289,7 +298,7 @@ async def check_server(srv: dict) -> dict:
         result["error"] = "blocked host"
         return result
     try:
-        async with httpx.AsyncClient(verify=False, timeout=10.0, follow_redirects=False) as hc:
+        async with httpx.AsyncClient(verify=srv.get("verify_cert", False), timeout=10.0, follow_redirects=False) as hc:
             # 1) Live stats (also proves reachability + auth)
             try:
                 r = await hc.get(f"{base}/authentic-theme/stats.cgi?xhr-stats=general", auth=auth)
@@ -326,8 +335,8 @@ async def check_server(srv: dict) -> dict:
                     result["updates"] = _count_updates(ru.text)
             except Exception:
                 pass
-    except Exception as e:
-        result["error"] = str(e)[:200]
+    except Exception:
+        result["error"] = "check failed"
     return result
 
 
@@ -592,6 +601,7 @@ def server_public(s: dict) -> dict:
         "port": s["port"],
         "username": s["username"],
         "use_ssl": s.get("use_ssl", True),
+        "verify_cert": s.get("verify_cert", False),
         "webmin_url": f"{'https' if s.get('use_ssl', True) else 'http'}://{s['host']}:{s['port']}/",
         "alerts_enabled": s.get("alerts_enabled", True),
         "last_status": s.get("last_status"),
@@ -611,6 +621,7 @@ async def add_server(body: ServerBody, user: dict = Depends(get_current_user)):
         "username": body.username,
         "password": enc_secret(body.password),
         "use_ssl": body.use_ssl,
+        "verify_cert": body.verify_cert,
         "alerts_enabled": True,
         "last_status": None,
         "created_at": now_utc().isoformat(),

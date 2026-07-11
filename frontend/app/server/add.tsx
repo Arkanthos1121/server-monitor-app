@@ -21,6 +21,7 @@ export default function AddServer() {
   const [username, setUsername] = useState("root");
   const [password, setPassword] = useState("");
   const [useSsl, setUseSsl] = useState(true);
+  const [verifyCert, setVerifyCert] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -34,6 +35,7 @@ export default function AddServer() {
         setPort(String(s.port));
         setUsername(s.username);
         setUseSsl(s.use_ssl);
+        setVerifyCert(s.verify_cert);
       } catch {}
     })();
   }, [id, isEdit]);
@@ -52,7 +54,7 @@ export default function AddServer() {
     try {
       const portNum = parseInt(port, 10) || 10000;
       if (isEdit) {
-        const body: any = { name: name.trim(), host: host.trim(), port: portNum, username: username.trim(), use_ssl: useSsl };
+        const body: any = { name: name.trim(), host: host.trim(), port: portNum, username: username.trim(), use_ssl: useSsl, verify_cert: verifyCert };
         if (password) body.password = password;
         await api.put(`/api/servers/${id}`, body);
       } else {
@@ -63,6 +65,7 @@ export default function AddServer() {
           username: username.trim(),
           password,
           use_ssl: useSsl,
+          verify_cert: verifyCert,
         });
       }
       router.back();
@@ -114,6 +117,22 @@ export default function AddServer() {
             thumbColor={useSsl ? colors.brand : colors.onSurfaceSecondary}
           />
         </View>
+
+        {useSsl && (
+          <View style={[styles.sslRow, { marginTop: spacing.md }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sslLabel}>VERIFY TLS CERTIFICATE</Text>
+              <Text style={styles.sslHint}>Enable only if this server has a valid (non-self-signed) cert</Text>
+            </View>
+            <Switch
+              testID="verify-cert-toggle"
+              value={verifyCert}
+              onValueChange={setVerifyCert}
+              trackColor={{ true: colors.brandTertiary, false: colors.surfaceTertiary }}
+              thumbColor={verifyCert ? colors.brand : colors.onSurfaceSecondary}
+            />
+          </View>
+        )}
 
         {error ? (
           <Text style={styles.error} testID="add-error">

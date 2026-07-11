@@ -84,6 +84,7 @@ export type Server = {
   port: number;
   username: string;
   use_ssl: boolean;
+  verify_cert: boolean;
   webmin_url: string;
   alerts_enabled: boolean;
   last_status: ServerStatus | null;

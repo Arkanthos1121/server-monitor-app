@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 2 regression + new features PASSED. Backend: 28/28 pytest cases pass — auth (register/login/me), password >=8 rule, brute-force throttle (5 wrong → 429 on 6th; success resets counter), SSRF guard blocks 127.0.0.1/0.0.0.0/169.254.169.254 while allowing 192.168.1.50 & 10.255.255.1, server CRUD (no password leak, verify_cert/alerts_enabled/webmin_url present), offline detection for 10.255.255.1, check-one & check-all, per-server alerts toggle persists, offline transition alert created & clearable, history endpoint returns list, settings CRUD reflected in /auth/me, register-push requires auth (401 no token, 201/500/502 with token). Frontend (mobile web, 390x844): register→dashboard→empty state→add server with HTTPS+VerifyTLS toggles→red OFFLINE card→detail with CPU/RAM/DISK gauges (dashes when offline), CPU%/RAM% sparklines with 'Collecting data…' placeholder, per-server alerts toggle, sticky Open Webmin Panel; bottom tabs GRID/ALERTS/SYSTEM navigate; Settings poll segmented 5m/15m/30m/1h selectable + Save shows 'Saved ✓'; logout returns to login. Fixed 1 critical backend NameError (undefined `verify` in httpx.AsyncClient) that would otherwise have broken every online check.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "(tabs)/_layout.tsx", "issues": ["Bottom tab labels visually clipped on Android/web at height=64 (paddingTop 8 + paddingBottom 10 leaves ~46px for icon+label). 'GRID' renders as 'GOTD' and 'ALERTS' as 'AI CDTS' — bottom halves of characters get cut. Recommend increasing Android height to ~72–76 or reducing paddingTop. Reference: /app/frontend/app/(tabs)/_layout.tsx:19-23"]}
+    ],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\"'. Migrate elevation/shadow* to boxShadow for RN 0.76+ web parity."},
+      {"component": "props.pointerEvents", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Likely from a Pressable/View using pointerEvents prop; move into style."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_webminpulse.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: raise Android bottom-tab height (or reduce paddingTop) so GRID/ALERTS labels aren't clipped on web preview.",
+    "Optional: silence 'shadow*' and 'pointerEvents' React Native web deprecation warnings by migrating to boxShadow / style.pointerEvents."
+  ],
+  "critical_code_review_comments": [
+    "server.py line 301 previously referenced an undefined variable `verify` inside httpx.AsyncClient(verify=verify,…) — this would raise NameError on every server check and silently mask it as 'check failed' via the outer try/except. Fixed to `verify=srv.get('verify_cert', False)` so the per-server verify_cert toggle actually takes effect."
+  ],
+  "updated_files": [
+    "/app/backend/server.py",
+    "/app/backend/tests/test_webminpulse.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/iteration_2.json"
+  ],
+  "success_rate": {"backend": "100% (28/28)", "frontend": "100% (all core flows verified)"},
+  "seed_data_creation": "Tests create isolated TEST_ prefixed users and servers; cleanup class removes them at end of run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Test suite lives at /app/backend/tests/test_webminpulse.py (pytest, 28 cases). Uses EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env, MongoDB creds from /app/backend/.env. The offline-transition alert test manipulates last_status via pymongo to simulate online→offline. IMPORTANT: unreachable/demo hosts intentionally show null CPU/RAM and empty history; do not flag as bugs. verify_cert defaults false (self-signed Webmin). Frontend uses testID (rendered as data-testid on web). Bottom tabs are accessible via page.get_by_role('tab', name='ALERTS'/'SYSTEM'/'GRID').",
+  "rca_of_issue": "Critical fix: server.py line 301 used `verify=verify` with no such variable in scope. The NameError was swallowed by the outer try/except (line 338), causing every server.check_server() to short-circuit with error='check failed' and online=False. Impact: any real Webmin server would appear offline even when reachable, and the per-server verify_cert toggle would have no effect. Mitigation: replaced with `verify=srv.get('verify_cert', False)` so httpx honours the per-server TLS verification setting. Verified with 28 passing tests including SSL checks on private-LAN hosts."
+}
