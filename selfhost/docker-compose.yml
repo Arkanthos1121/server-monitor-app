@@ -23,12 +23,18 @@ services:
             && rm -rf /var/lib/apt/lists/*
         WORKDIR /app
         RUN pip install --no-cache-dir fastapi "uvicorn[standard]" motor pymongo \
-            "pydantic[email]" python-dotenv httpx bcrypt pyjwt cryptography
-        COPY server.py .
+            "pydantic[email]" python-dotenv httpx bcrypt pyjwt cryptography "discord.py>=2.3.2"
+        COPY . .
         CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]
     env_file: .env
     ports:
       - "8001:8001"
+    volumes:
+      # Game-server installs live on the host so they survive container rebuilds.
+      # NOTE: SteamCMD and virtually all dedicated servers are x86_64-only. On an
+      # ARM Pi the scan, catalog and Discord bot work, but starting a server does
+      # not - point GAMESERVER_BASE_DIR at an x86_64 box for that.
+      - ${GAMESERVER_BASE_DIR:-./gameservers}:/opt/gameservers
     cap_add:
       - NET_RAW               # allows ICMP "ping" check mode inside the container
 

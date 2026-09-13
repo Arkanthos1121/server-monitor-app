@@ -95,3 +95,74 @@ Your data lives in the `mongo_data` Docker volume. Back it up:
 ```bash
 docker exec wp-mongo sh -c 'mongodump --archive' > backup-$(date +%F).archive
 ```
+
+---
+
+# Game servers + Discord control
+
+Start and stop dedicated game servers from a Discord channel. Servers stop
+themselves after **12 hours** unless somebody extends them.
+
+## Which of my games can do this?
+
+See `backend/steam/README.md` — scan your library first, then configure the games
+you actually want to host.
+
+## Requirements
+
+- An **x86_64** host. SteamCMD and essentially every dedicated server are x86_64-only,
+  so the *hosting* half of this does not work on a Raspberry Pi. The scan, catalog,
+  API and Discord bot all run fine on ARM — only launching servers needs x86.
+- SteamCMD installed and on `PATH` (or set `STEAMCMD_PATH`).
+
+```bash
+sudo apt install software-properties-common
+sudo add-apt-repository multiverse && sudo dpkg --add-architecture i386 && sudo apt update
+sudo apt install steamcmd
+```
+
+## Creating the Discord bot
+
+1. <https://discord.com/developers/applications> → **New Application** → **Bot** → copy the token.
+2. Invite it with the `bot` and `applications.commands` scopes.
+3. Put the token in `.env` as `DISCORD_BOT_TOKEN`, set `DISCORD_GUILD_ID` to your
+   server's ID so slash commands register immediately, and set `DISCORD_OWNER_EMAIL`
+   to the WebminPulse account whose servers the bot should control.
+4. `docker compose up -d --build` → the log shows `Discord bot enabled`.
+
+Leaving `DISCORD_BOT_TOKEN` blank disables the bot; everything else still runs.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/servers` | Every configured server, its status, and time left before auto-stop |
+| `/start <server>` | Start a server. Sets the 12-hour clock. |
+| `/stop <server>` | Stop it now |
+| `/extend <server> [hours]` | Push auto-stop out, measured **from now** (default 6h, max 24h) |
+| `/keepalive <server> [on]` | Exempt from auto-stop entirely; `off` re-arms the 12h timer |
+| `/install <server>` | Download/update the server via SteamCMD |
+
+Server names autocomplete. Set `DISCORD_ALLOWED_ROLE` to restrict start/stop/install
+to one role — `/extend` stays open so players can keep their own session alive.
+
+## The 12-hour rule
+
+- Starting a server sets `auto_stop_at` to 12 hours out.
+- A reaper runs every 60s. `GAMESERVER_WARN_BEFORE_MIN` (default 15) minutes before
+  the deadline it posts a warning naming the extend command; at the deadline it stops
+  the server and says so.
+- `/extend 3` means *three hours from now*, not three hours added to whatever was
+  left — so it behaves the way people expect when a session is nearly up.
+- Stops are graceful: SIGTERM to the process group, then SIGKILL after
+  `GAMESERVER_STOP_GRACE` seconds, so worlds get a chance to save.
+- Every start/stop/extend is written to `gameserver_events` with who ran it.
+
+Change the window with `GAMESERVER_AUTO_STOP_HOURS`; the whole system reads that
+one value.
+
+## If the backend restarts
+
+Running servers are tracked by PID plus process start time, so a restarted backend
+re-attaches to servers that are still up and marks crashed ones stopped instead of
+showing a phantom "running". PID reuse is detected rather than trusted.

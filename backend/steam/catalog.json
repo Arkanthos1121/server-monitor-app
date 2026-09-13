@@ -1,0 +1,1077 @@
+{
+ "generated_from": "api.steamcmd.net",
+ "entries": [
+  {
+   "game_appid": 251570,
+   "game_name": "7 Days to Die",
+   "hint": "7 Days to Die",
+   "server_browser_name": "7 Days To Die",
+   "server_appid": 294420,
+   "server_name": "7 Days to Die Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 427410,
+   "game_name": "Abiotic Factor",
+   "hint": "Abiotic Factor",
+   "server_browser_name": "Abiotic Factor",
+   "server_appid": 2857200,
+   "server_name": "Abiotic Factor Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 630,
+   "game_name": "Alien Swarm",
+   "hint": "Alien Swarm",
+   "server_browser_name": "Alien Swarm",
+   "server_appid": 635,
+   "server_name": "Alien Swarm Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 270880,
+   "game_name": "American Truck Simulator",
+   "hint": "American Truck Simulator",
+   "server_browser_name": "",
+   "server_appid": 2239530,
+   "server_name": "American Truck Simulator Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 2399830,
+   "game_name": "ARK: Survival Ascended",
+   "hint": "ARK: Survival Ascended",
+   "server_browser_name": "",
+   "server_appid": 2430930,
+   "server_name": "ARK: Survival Ascended Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 346110,
+   "game_name": "ARK: Survival Evolved",
+   "hint": "ARK: Survival Evolved",
+   "server_browser_name": "ARK: Survival Evolved",
+   "server_appid": 376030,
+   "server_name": "ARK: Survival Evolved Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 107410,
+   "game_name": "Arma 3",
+   "hint": "Arma 3",
+   "server_browser_name": "Arma 3",
+   "server_appid": 233780,
+   "server_name": "Arma 3 Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 1874880,
+   "game_name": "Arma Reforger",
+   "hint": "Arma Reforger",
+   "server_browser_name": "",
+   "server_appid": 1890870,
+   "server_name": "Arma Reforger Experimental Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 244210,
+   "game_name": "Assetto Corsa",
+   "hint": "Assetto Corsa",
+   "server_browser_name": "",
+   "server_appid": 302550,
+   "server_name": "Assetto Corsa Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 805550,
+   "game_name": "Assetto Corsa Competizione",
+   "hint": "Assetto Corsa Competizione",
+   "server_browser_name": "",
+   "server_appid": null,
+   "server_name": null,
+   "ok": true,
+   "why": "server ships with the game",
+   "signals": [
+    "bundled"
+   ],
+   "bundled": true
+  },
+  {
+   "game_appid": 361420,
+   "game_name": "ASTRONEER",
+   "hint": "ASTRONEER",
+   "server_browser_name": "",
+   "server_appid": 728470,
+   "server_name": "ASTRONEER Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 834910,
+   "game_name": "ATLAS",
+   "hint": "ATLAS",
+   "server_browser_name": "",
+   "server_appid": 1006030,
+   "server_name": "ATLAS Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 445220,
+   "game_name": "Avorion",
+   "hint": "Avorion",
+   "server_browser_name": "",
+   "server_appid": 565060,
+   "server_name": "Avorion Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 2379780,
+   "game_name": "Balatro",
+   "hint": "Vintage Story",
+   "server_browser_name": "",
+   "server_appid": null,
+   "server_name": null,
+   "ok": true,
+   "why": "server ships with the game",
+   "signals": [
+    "bundled"
+   ],
+   "bundled": true
+  },
+  {
+   "game_appid": 602960,
+   "game_name": "Barotrauma",
+   "hint": "Barotrauma",
+   "server_browser_name": "",
+   "server_appid": 1026340,
+   "server_name": "Barotrauma Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 1517290,
+   "game_name": "Battlefield\u2122 2042",
+   "hint": "Battlefield 2042",
+   "server_browser_name": "",
+   "server_appid": null,
+   "server_name": null,
+   "ok": true,
+   "why": "server ships with the game",
+   "signals": [
+    "bundled"
+   ],
+   "bundled": true
+  },
+  {
+   "game_appid": 440900,
+   "game_name": "Conan Exiles Enhanced",
+   "hint": "Conan Exiles",
+   "server_browser_name": "Conan Exiles",
+   "server_appid": 443030,
+   "server_name": "Conan Exiles Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 1963720,
+   "game_name": "Core Keeper Dedicated Server",
+   "hint": "Core Keeper",
+   "server_browser_name": "",
+   "server_appid": 1963720,
+   "server_name": "Core Keeper Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 10,
+   "game_name": "Counter-Strike",
+   "hint": "Counter-Strike",
+   "server_browser_name": "Counter-Strike",
+   "server_appid": 90,
+   "server_name": "Half-Life Dedicated Server",
+   "ok": true,
+   "why": "shared multi-game server app",
+   "signals": [
+    "serverbrowsername",
+    "shared_server_app"
+   ]
+  },
+  {
+   "game_appid": 730,
+   "game_name": "Counter-Strike 2",
+   "hint": "Counter-Strike 2",
+   "server_browser_name": "Counter-Strike 2",
+   "server_appid": 740,
+   "server_name": "Counter-Strike Global Offensive - Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 240,
+   "game_name": "Counter-Strike: Source",
+   "hint": "Counter-Strike: Source",
+   "server_browser_name": "Counter-Strike: Source",
+   "server_appid": 232330,
+   "server_name": "Counter-Strike: Source Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 30,
+   "game_name": "Day of Defeat",
+   "hint": "Day of Defeat",
+   "server_browser_name": "Day of Defeat",
+   "server_appid": 90,
+   "server_name": "Half-Life Dedicated Server",
+   "ok": true,
+   "why": "shared multi-game server app",
+   "signals": [
+    "serverbrowsername",
+    "shared_server_app"
+   ]
+  },
+  {
+   "game_appid": 300,
+   "game_name": "Day of Defeat: Source",
+   "hint": "Day of Defeat: Source",
+   "server_browser_name": "Day of Defeat: Source",
+   "server_appid": 232290,
+   "server_name": "Day of Defeat: Source Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 447820,
+   "game_name": "Day of Infamy",
+   "hint": "Day of Infamy",
+   "server_browser_name": "Day of Infamy",
+   "server_appid": 462310,
+   "server_name": "Day of Infamy Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 221100,
+   "game_name": "DayZ",
+   "hint": "DayZ",
+   "server_browser_name": "",
+   "server_appid": 223350,
+   "server_name": "DayZ Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 40,
+   "game_name": "Deathmatch Classic",
+   "hint": "Deathmatch Classic",
+   "server_browser_name": "Deathmatch Classic",
+   "server_appid": 90,
+   "server_name": "Half-Life Dedicated Server",
+   "ok": true,
+   "why": "shared multi-game server app",
+   "signals": [
+    "serverbrowsername",
+    "shared_server_app"
+   ]
+  },
+  {
+   "game_appid": 322330,
+   "game_name": "Don't Starve Together",
+   "hint": "Don't Starve Together",
+   "server_browser_name": "Don't Starve Together",
+   "server_appid": 343050,
+   "server_name": "Don't Starve Together Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 382310,
+   "game_name": "Eco",
+   "hint": "Eco",
+   "server_browser_name": "",
+   "server_appid": 739590,
+   "server_name": "Eco Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 383120,
+   "game_name": "Empyrion - Galactic Survival",
+   "hint": "Empyrion - Galactic Survival",
+   "server_browser_name": "",
+   "server_appid": 530870,
+   "server_name": "Empyrion - Galactic Survival Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 1203620,
+   "game_name": "Enshrouded",
+   "hint": "Enshrouded",
+   "server_browser_name": "Enshrouded",
+   "server_appid": 2278520,
+   "server_name": "Enshrouded Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 227300,
+   "game_name": "Euro Truck Simulator 2",
+   "hint": "Euro Truck Simulator 2",
+   "server_browser_name": "",
+   "server_appid": 1948160,
+   "server_name": "Euro Truck Simulator 2 Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 427520,
+   "game_name": "Factorio",
+   "hint": "Factorio",
+   "server_browser_name": "",
+   "server_appid": null,
+   "server_name": null,
+   "ok": true,
+   "why": "server ships with the game",
+   "signals": [
+    "bundled"
+   ],
+   "bundled": true
+  },
+  {
+   "game_appid": 1248130,
+   "game_name": "Farming Simulator 22",
+   "hint": "Farming Simulator 22",
+   "server_browser_name": "",
+   "server_appid": null,
+   "server_name": null,
+   "ok": true,
+   "why": "server ships with the game",
+   "signals": [
+    "bundled"
+   ],
+   "bundled": true
+  },
+  {
+   "game_appid": 2300320,
+   "game_name": "Farming Simulator 25",
+   "hint": "Farming Simulator 25",
+   "server_browser_name": "",
+   "server_appid": null,
+   "server_name": null,
+   "ok": true,
+   "why": "server ships with the game",
+   "signals": [
+    "bundled"
+   ],
+   "bundled": true
+  },
+  {
+   "game_appid": 4000,
+   "game_name": "Garry's Mod",
+   "hint": "Garry's Mod",
+   "server_browser_name": "Garry's Mod",
+   "server_appid": 4020,
+   "server_name": "Garry's Mod Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 70,
+   "game_name": "Half-Life",
+   "hint": "Half-Life",
+   "server_browser_name": "Half-Life",
+   "server_appid": 90,
+   "server_name": "Half-Life Dedicated Server",
+   "ok": true,
+   "why": "shared multi-game server app",
+   "signals": [
+    "serverbrowsername",
+    "shared_server_app"
+   ]
+  },
+  {
+   "game_appid": 320,
+   "game_name": "Half-Life 2: Deathmatch",
+   "hint": "Half-Life 2: Deathmatch",
+   "server_browser_name": "Half-Life 2: Deathmatch",
+   "server_appid": 232370,
+   "server_name": "Half-Life 2: Deathmatch Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 360,
+   "game_name": "Half-Life Deathmatch: Source",
+   "hint": "Half-Life Deathmatch: Source",
+   "server_browser_name": "Half-Life Deathmatch: Source",
+   "server_appid": 255470,
+   "server_name": "Half-Life Deathmatch: Source Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 50,
+   "game_name": "Half-Life: Opposing Force",
+   "hint": "Half-Life: Opposing Force",
+   "server_browser_name": "Opposing Force",
+   "server_appid": 90,
+   "server_name": "Half-Life Dedicated Server",
+   "ok": true,
+   "why": "shared multi-game server app",
+   "signals": [
+    "serverbrowsername",
+    "shared_server_app"
+   ]
+  },
+  {
+   "game_appid": 393420,
+   "game_name": "Hurtworld",
+   "hint": "Hurtworld",
+   "server_browser_name": "Hurtworld",
+   "server_appid": 405100,
+   "server_name": "Hurtworld Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 1149460,
+   "game_name": "Icarus",
+   "hint": "ICARUS",
+   "server_browser_name": "Icarus",
+   "server_appid": 2089300,
+   "server_name": "Icarus Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 222880,
+   "game_name": "Insurgency",
+   "hint": "Insurgency",
+   "server_browser_name": "Insurgency",
+   "server_appid": 237410,
+   "server_name": "Insurgency Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 581320,
+   "game_name": "Insurgency: Sandstorm",
+   "hint": "Insurgency: Sandstorm",
+   "server_browser_name": "Insurgency: Sandstorm",
+   "server_appid": 581330,
+   "server_name": "Insurgency: Sandstorm Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 1966010,
+   "game_name": "Jurassic World Evolution 2: Dominion Biosyn Expansion",
+   "hint": "Necesse",
+   "server_browser_name": "",
+   "server_appid": null,
+   "server_name": null,
+   "ok": true,
+   "why": "server ships with the game",
+   "signals": [
+    "bundled"
+   ],
+   "bundled": true
+  },
+  {
+   "game_appid": 1250,
+   "game_name": "Killing Floor",
+   "hint": "Killing Floor",
+   "server_browser_name": "Killing Floor",
+   "server_appid": 215350,
+   "server_name": "Killing Floor Dedicated Server - Win32",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 232090,
+   "game_name": "Killing Floor 2",
+   "hint": "Killing Floor 2",
+   "server_browser_name": "Killing Floor 2",
+   "server_appid": 232130,
+   "server_name": "Killing Floor 2 - Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 899770,
+   "game_name": "Last Epoch",
+   "hint": "Last Oasis",
+   "server_browser_name": "",
+   "server_appid": 920720,
+   "server_name": "Last Oasis - Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 500,
+   "game_name": "Left 4 Dead",
+   "hint": "Left 4 Dead",
+   "server_browser_name": "Left 4 Dead",
+   "server_appid": 222840,
+   "server_name": "Left 4 Dead Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 550,
+   "game_name": "Left 4 Dead 2",
+   "hint": "Left 4 Dead 2",
+   "server_browser_name": "Left 4 Dead",
+   "server_appid": 222860,
+   "server_name": "Left 4 Dead 2 Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 333950,
+   "game_name": "Medieval Engineers",
+   "hint": "Medieval Engineers",
+   "server_browser_name": "Medieval Engineers",
+   "server_appid": 367970,
+   "server_name": "Medieval Engineers Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 299740,
+   "game_name": "Miscreated",
+   "hint": "Miscreated",
+   "server_browser_name": "Miscreated",
+   "server_appid": 302200,
+   "server_name": "Miscreated Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 629760,
+   "game_name": "MORDHAU",
+   "hint": "MORDHAU",
+   "server_browser_name": "",
+   "server_appid": 629800,
+   "server_name": "MORDHAU Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 224260,
+   "game_name": "No More Room in Hell",
+   "hint": "No More Room in Hell",
+   "server_browser_name": "No More Room in Hell",
+   "server_appid": 317670,
+   "server_name": "No More Room in Hell Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 1623730,
+   "game_name": "Palworld",
+   "hint": "Palworld",
+   "server_browser_name": "",
+   "server_appid": 2394010,
+   "server_name": "Palworld Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 108600,
+   "game_name": "Project Zomboid",
+   "hint": "Project Zomboid",
+   "server_browser_name": "Project Zomboid",
+   "server_appid": 380870,
+   "server_name": "Project Zomboid Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 282440,
+   "game_name": "Quake Live",
+   "hint": "Quake Live",
+   "server_browser_name": "Quake Live",
+   "server_appid": 349090,
+   "server_name": "Quake Live Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 365960,
+   "game_name": "rFactor 2",
+   "hint": "rFactor 2",
+   "server_browser_name": "rFactor 2",
+   "server_appid": null,
+   "server_name": null,
+   "ok": true,
+   "why": "server ships with the game",
+   "signals": [
+    "serverbrowsername",
+    "bundled"
+   ],
+   "bundled": true
+  },
+  {
+   "game_appid": 252490,
+   "game_name": "Rust",
+   "hint": "Rust",
+   "server_browser_name": "Rust",
+   "server_appid": 258550,
+   "server_name": "Rust Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 526870,
+   "game_name": "Satisfactory",
+   "hint": "Satisfactory",
+   "server_browser_name": "",
+   "server_appid": 1690800,
+   "server_name": "Satisfactory Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 513710,
+   "game_name": "SCUM",
+   "hint": "SCUM",
+   "server_browser_name": "",
+   "server_appid": 3792580,
+   "server_name": "SCUM Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 1326470,
+   "game_name": "Sons Of The Forest",
+   "hint": "Sons of the Forest",
+   "server_browser_name": "",
+   "server_appid": 2465200,
+   "server_name": "Sons Of The Forest Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 2646460,
+   "game_name": "Soulmask",
+   "hint": "Soulmask",
+   "server_browser_name": "",
+   "server_appid": 3017300,
+   "server_name": "Soulmask Dedicated Server For Linux",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 244850,
+   "game_name": "Space Engineers",
+   "hint": "Space Engineers",
+   "server_browser_name": "Space Engineers",
+   "server_appid": 298740,
+   "server_name": "Space Engineers Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 393380,
+   "game_name": "Squad",
+   "hint": "Squad",
+   "server_browser_name": "Squad",
+   "server_appid": 403240,
+   "server_name": "Squad Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 736220,
+   "game_name": "Squad 44",
+   "hint": "Post Scriptum",
+   "server_browser_name": "Post Scriptum",
+   "server_appid": 746200,
+   "server_name": "Squad 44 Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 211820,
+   "game_name": "Starbound",
+   "hint": "Starbound",
+   "server_browser_name": "",
+   "server_appid": 533830,
+   "server_name": "Starbound Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 544550,
+   "game_name": "Stationeers",
+   "hint": "Stationeers",
+   "server_browser_name": "Stationeers",
+   "server_appid": 600760,
+   "server_name": "Stationeers Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 17520,
+   "game_name": "Synergy",
+   "hint": "Synergy",
+   "server_browser_name": "Synergy",
+   "server_appid": 17525,
+   "server_name": "Synergy Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 440,
+   "game_name": "Team Fortress 2",
+   "hint": "Team Fortress 2",
+   "server_browser_name": "Team Fortress 2",
+   "server_appid": 232250,
+   "server_name": "Team Fortress 2 Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 20,
+   "game_name": "Team Fortress Classic",
+   "hint": "Team Fortress Classic",
+   "server_browser_name": "Team Fortress Classic",
+   "server_appid": 90,
+   "server_name": "Half-Life Dedicated Server",
+   "ok": true,
+   "why": "shared multi-game server app",
+   "signals": [
+    "serverbrowsername",
+    "shared_server_app"
+   ]
+  },
+  {
+   "game_appid": 105600,
+   "game_name": "Terraria",
+   "hint": "Terraria",
+   "server_browser_name": "",
+   "server_appid": null,
+   "server_name": null,
+   "ok": true,
+   "why": "server ships with the game",
+   "signals": [
+    "bundled"
+   ],
+   "bundled": true
+  },
+  {
+   "game_appid": 242760,
+   "game_name": "The Forest",
+   "hint": "The Forest",
+   "server_browser_name": "The Forest",
+   "server_appid": 556450,
+   "server_name": "The Forest Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 376210,
+   "game_name": "The Isle",
+   "hint": "The Isle",
+   "server_browser_name": "The Isle",
+   "server_appid": 412680,
+   "server_name": "The Isle Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 304930,
+   "game_name": "Unturned",
+   "hint": "Unturned",
+   "server_browser_name": "Unturned",
+   "server_appid": 1110390,
+   "server_name": "Unturned Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 1604030,
+   "game_name": "V Rising",
+   "hint": "V Rising",
+   "server_browser_name": "V Rising",
+   "server_appid": 1829350,
+   "server_name": "V Rising Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 892970,
+   "game_name": "Valheim",
+   "hint": "Valheim",
+   "server_browser_name": "Valheim",
+   "server_appid": 896660,
+   "server_name": "Valheim Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 228380,
+   "game_name": "Wreckfest",
+   "hint": "Wreckfest",
+   "server_browser_name": "Wreckfest",
+   "server_appid": 361580,
+   "server_name": "Wreckfest Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  },
+  {
+   "game_appid": 366220,
+   "game_name": "Wurm Unlimited",
+   "hint": "Wurm Unlimited",
+   "server_browser_name": "Wurm Unlimited Server",
+   "server_appid": 402370,
+   "server_name": "Wurm Unlimited Dedicated Server",
+   "ok": true,
+   "why": "verified",
+   "signals": [
+    "serverbrowsername",
+    "server_app"
+   ]
+  }
+ ]
+}
