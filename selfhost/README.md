@@ -108,12 +108,40 @@ themselves after **12 hours** unless somebody extends them.
 See `backend/steam/README.md` — scan your library first, then configure the games
 you actually want to host.
 
+## Where the servers run
+
+SteamCMD and essentially every dedicated server are **x86_64-only**, so the hosting
+half cannot run on a Raspberry Pi. The scan, catalog, API and Discord bot all run
+fine on ARM — only launching servers needs x86. Two supported layouts:
+
+**A. Everything on the gameserver.** Run this whole stack on the x86_64 box and
+leave `GAMESERVER_SSH_HOST` blank. Servers launch as local processes. Simplest.
+
+**B. Backend on the Pi, servers on the gameserver.** Keep the backend where it
+already watches your LAN, and point it at the gameserver over SSH:
+
+```bash
+GAMESERVER_SSH_HOST=gameserver.lan
+GAMESERVER_SSH_USER=steam
+GAMESERVER_SSH_KEY=/keys/id_ed25519
+GAMESERVER_BASE_DIR=/opt/gameservers   # path on the GAMESERVER, not the Pi
+```
+
+Install/start/stop then run over SSH on that box. Set it up with a key, not a
+password — the backend uses `BatchMode=yes` and will never sit on a prompt:
+
+```bash
+ssh-keygen -t ed25519 -f ./gameserver_key -N ""
+ssh-copy-id -i ./gameserver_key.pub steam@gameserver.lan
+```
+
+Mount the private key into the container and point `GAMESERVER_SSH_KEY` at it.
+Servers are started with `setsid`, so they keep running if the backend restarts
+or the SSH connection drops.
+
 ## Requirements
 
-- An **x86_64** host. SteamCMD and essentially every dedicated server are x86_64-only,
-  so the *hosting* half of this does not work on a Raspberry Pi. The scan, catalog,
-  API and Discord bot all run fine on ARM — only launching servers needs x86.
-- SteamCMD installed and on `PATH` (or set `STEAMCMD_PATH`).
+- SteamCMD installed on whichever box runs the servers (on `PATH`, or set `STEAMCMD_PATH`).
 
 ```bash
 sudo apt install software-properties-common

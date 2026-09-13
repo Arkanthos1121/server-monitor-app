@@ -33,8 +33,11 @@ services:
       # Game-server installs live on the host so they survive container rebuilds.
       # NOTE: SteamCMD and virtually all dedicated servers are x86_64-only. On an
       # ARM Pi the scan, catalog and Discord bot work, but starting a server does
-      # not - point GAMESERVER_BASE_DIR at an x86_64 box for that.
-      - ${GAMESERVER_BASE_DIR:-./gameservers}:/opt/gameservers
+      # not - set GAMESERVER_SSH_HOST to drive a separate x86_64 box instead.
+      # Only needed when servers run on THIS host (GAMESERVER_SSH_HOST blank):
+      - ${GAMESERVER_LOCAL_DIR:-./gameservers}:/opt/gameservers
+      # SSH key used to reach a remote gameserver, when configured:
+      - ${GAMESERVER_SSH_KEY_DIR:-./keys}:/keys:ro
     cap_add:
       - NET_RAW               # allows ICMP "ping" check mode inside the container
 

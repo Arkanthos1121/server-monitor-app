@@ -68,6 +68,7 @@ def db(monkeypatch):
     # Never touch real processes in tests.
     monkeypatch.setattr(gs, "spawn", _fake_spawn)
     monkeypatch.setattr(gs, "terminate", _fake_terminate)
+    monkeypatch.setattr(gs, "alive", _fake_alive)
     monkeypatch.setattr(gs, "is_alive", lambda pid, ticks=None: pid == 4242)
     return d
 
@@ -78,6 +79,11 @@ async def _fake_spawn(rec):
 
 async def _fake_terminate(pid, grace=30):
     return "stopped cleanly"
+
+
+async def _fake_alive(rec):
+    """Only the PID our fake spawn hands out is considered a live process."""
+    return rec.get("pid") == 4242
 
 
 async def make(db, **kw):

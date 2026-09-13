@@ -127,12 +127,23 @@ updates and notify. (User asked to pause and check in at ~50 credits.)
 - Tests: 33 passing (`tests/test_gameservers.py`, `tests/test_gameserver_service.py`) covering
   the 12h boundary, extend-saves-from-reaper, keepalive, PID reuse, audit trail, reconcile.
 
+- Split topology (user runs a separate GAMESERVER box, not the Pi): gameservers.py can drive
+  a remote host over SSH. GAMESERVER_SSH_HOST blank = local subprocesses; set = install/start/
+  stop run on that box. Servers launched with setsid so they survive backend restarts and
+  dropped SSH connections; remote stop mirrors the SIGTERM->SIGKILL grace locally.
+  15 tests cover argv construction, PID capture, and both terminate paths.
+
 ### Known Limitations
 - SteamCMD and dedicated servers are x86_64-only: the hosting half does NOT run on a Pi.
-  Scan/catalog/API/bot are fine on ARM. Called out in selfhost/README.md.
+  Scan/catalog/API/bot are fine on ARM. Use GAMESERVER_SSH_HOST to reach an x86_64 box.
+- Remote mode drops the /proc start-tick check (pid_start_ticks is local-only), so remote
+  PID-reuse detection is weaker than local. Acceptable: setsid PIDs are long-lived.
 - The bot acts as ONE WebminPulse account (DISCORD_OWNER_EMAIL). No per-Discord-user linking.
 - Launch profiles cover 21 popular servers; other games need `launch_cmd` set explicitly.
 - Catalog is not exhaustive. Games with no verified server app and no `serverbrowsername`
   (Green Hell, Sunkenland, Deadside, Citadel, Myth of Empires, Reign of Kings, Dark and Light)
   are deliberately omitted rather than guessed at.
-- Not yet run against a real Steam library or a live Discord guild — needs user's API key/token.
+- Not yet run against a real Steam library, a live Discord guild, or a real SteamCMD install.
+- Steam's community games page now returns a Sign In shell to datacenter IPs even for public
+  profiles (verified against the user's own public profile, visibilityState 3, with a browser
+  UA). There is NO credential-free way to read a library; the Web API key is required.

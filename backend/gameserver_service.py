@@ -67,7 +67,7 @@ async def find(user_id: str, needle: str) -> Optional[dict]:
 
 async def reconcile(rec: dict) -> dict:
     """Trust the OS over the database: a dead PID means the server is stopped."""
-    if rec.get("status") == "running" and not gs.is_alive(rec.get("pid"), rec.get("pid_start_ticks")):
+    if rec.get("status") == "running" and not await gs.alive(rec):
         await _db.gameservers.update_one(
             {"id": rec["id"]},
             {"$set": {"status": "stopped", "pid": None, "auto_stop_at": None,

@@ -26,6 +26,41 @@ BASE_DIR = Path(os.environ.get("GAMESERVER_BASE_DIR", "/opt/gameservers"))
 STEAMCMD = os.environ.get("STEAMCMD_PATH", "steamcmd")
 STOP_GRACE_SECONDS = int(os.environ.get("GAMESERVER_STOP_GRACE", "30"))
 
+# Where the servers actually run. Blank = same host as the backend. Set these to
+# drive a separate x86_64 box (the "gameserver") while the backend lives
+# elsewhere, e.g. on a Pi that could never run SteamCMD itself.
+SSH_HOST = os.environ.get("GAMESERVER_SSH_HOST", "").strip()
+SSH_USER = os.environ.get("GAMESERVER_SSH_USER", "steam").strip()
+SSH_PORT = os.environ.get("GAMESERVER_SSH_PORT", "22").strip()
+SSH_KEY = os.environ.get("GAMESERVER_SSH_KEY", "").strip()
+
+
+def remote() -> bool:
+    """True when servers run on a different machine than the backend."""
+    return bool(SSH_HOST)
+
+
+def _ssh_argv() -> list[str]:
+    argv = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=10", "-p", SSH_PORT]
+    if SSH_KEY:
+        argv += ["-i", SSH_KEY]
+    return argv + [f"{SSH_USER}@{SSH_HOST}"]
+
+
+async def run_shell(command: str, timeout: int = 900) -> tuple[int, str]:
+    """Run a shell command on whichever host owns the game servers."""
+    argv = (_ssh_argv() + [command]) if remote() else ["bash", "-lc", command]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        return 124, f"timed out after {timeout}s"
+    except FileNotFoundError as e:
+        return 127, str(e)
+    return proc.returncode, (out or b"").decode("utf-8", "replace")
+
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -96,6 +131,30 @@ def is_alive(pid: Optional[int], start_ticks: Optional[int] = None) -> bool:
     return True
 
 
+async def alive(rec: dict) -> bool:
+    """Is this server's process still up, local or remote?"""
+    pid = rec.get("pid")
+    if not pid:
+        return False
+    if remote():
+        code, _ = await run_shell(f"kill -0 {int(pid)} 2>/dev/null", timeout=20)
+        return code == 0
+    return is_alive(pid, rec.get("pid_start_ticks"))
+
+
+async def _terminate_remote(pid: int, grace: int) -> str:
+    """Same graceful stop, executed on the gameserver box."""
+    code, _ = await run_shell(f"kill -0 {int(pid)} 2>/dev/null", timeout=20)
+    if code != 0:
+        return "already stopped"
+    stop = (f"kill -TERM -{int(pid)} 2>/dev/null || kill -TERM {int(pid)} 2>/dev/null; "
+            f"for i in $(seq 1 {int(grace)}); do kill -0 {int(pid)} 2>/dev/null || "
+            f"{{ echo CLEAN; exit 0; }}; sleep 1; done; "
+            f"kill -KILL -{int(pid)} 2>/dev/null || kill -KILL {int(pid)} 2>/dev/null; echo KILLED")
+    _code, out = await run_shell(stop, timeout=grace + 30)
+    return "stopped cleanly" if "CLEAN" in out else "force-killed after grace period"
+
+
 def install_dir(rec: dict) -> Path:
     slug = re.sub(r"[^a-z0-9]+", "-", rec["name"].lower()).strip("-") or "server"
     return BASE_DIR / f"{slug}-{rec['server_appid']}"
@@ -124,19 +183,14 @@ async def steamcmd_install(rec: dict, validate: bool = False) -> tuple[bool, str
     """Install or update the server's Steam app. Returns (ok, tail_of_output)."""
     d = install_dir(rec)
     d.mkdir(parents=True, exist_ok=True)
-    cmd = [STEAMCMD, "+force_install_dir", str(d), "+login", "anonymous",
-           "+app_update", str(rec["server_appid"])]
-    if validate:
-        cmd.append("validate")
-    cmd.append("+quit")
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-        out, _ = await proc.communicate()
-    except FileNotFoundError:
-        return False, f"steamcmd not found at '{STEAMCMD}' (set STEAMCMD_PATH)"
-    tail = (out or b"").decode("utf-8", "replace")[-1500:]
-    return proc.returncode == 0, tail
+    cmd = (f"mkdir -p {shlex.quote(str(d))} && {shlex.quote(STEAMCMD)} "
+           f"+force_install_dir {shlex.quote(str(d))} +login anonymous "
+           f"+app_update {int(rec['server_appid'])}{' validate' if validate else ''} +quit")
+    code, out = await run_shell(cmd)
+    if code == 127:
+        where = f"{SSH_USER}@{SSH_HOST}" if remote() else "this host"
+        return False, f"steamcmd not found on {where} (set STEAMCMD_PATH)"
+    return code == 0, out[-1500:]
 
 
 async def spawn(rec: dict) -> tuple[Optional[int], Optional[int], str]:
@@ -146,26 +200,31 @@ async def spawn(rec: dict) -> tuple[Optional[int], Optional[int], str]:
         return None, None, ("No launch profile for this game. Set launch_cmd on the "
                             "server to run it manually.")
     d = install_dir(rec)
-    if not d.exists():
-        return None, None, f"Not installed yet ({d} missing) - install it first."
     logs = d / "wp-server.log"
-    try:
-        fh = open(logs, "ab", buffering=0)
-        proc = await asyncio.create_subprocess_exec(
-            *shlex.split(cmd), cwd=str(d), stdout=fh, stderr=asyncio.subprocess.STDOUT,
-            stdin=asyncio.subprocess.DEVNULL, start_new_session=True)
-    except FileNotFoundError:
-        return None, None, f"Server binary missing for '{rec['name']}' - reinstall it."
-    except Exception as e:
-        return None, None, f"Could not start: {e}"
-    await asyncio.sleep(1.5)
-    if proc.returncode is not None:
-        return None, None, f"Server exited immediately (code {proc.returncode}); see {logs}"
-    return proc.pid, _proc_start_ticks(proc.pid), f"Started (pid {proc.pid})"
+    # setsid detaches the server so it survives the SSH session / backend restart,
+    # and puts it in its own process group so stopping it takes the children too.
+    launch = (f"cd {shlex.quote(str(d))} 2>/dev/null || exit 66; "
+              f"setsid nohup {cmd} >> {shlex.quote(str(logs))} 2>&1 < /dev/null & echo $!")
+    code, out = await run_shell(launch, timeout=60)
+    if code == 66:
+        return None, None, f"Not installed yet ({d} missing) - install it first."
+    if code != 0:
+        return None, None, f"Could not start: {out.strip()[:300]}"
+    pid = next((int(t) for t in out.split() if t.isdigit()), None)
+    if not pid:
+        return None, None, f"Started but no PID came back: {out.strip()[:200]}"
+
+    await asyncio.sleep(2)
+    if not await alive({"pid": pid}):
+        return None, None, f"Server exited immediately; check {logs}"
+    ticks = None if remote() else _proc_start_ticks(pid)
+    return pid, ticks, f"Started (pid {pid})"
 
 
 async def terminate(pid: int, grace: int = STOP_GRACE_SECONDS) -> str:
     """SIGTERM the process group, escalate to SIGKILL if it overstays `grace`."""
+    if remote():
+        return await _terminate_remote(pid, grace)
     if not is_alive(pid):
         return "already stopped"
     try:
