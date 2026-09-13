@@ -247,3 +247,119 @@ async def terminate(pid: int, grace: int = STOP_GRACE_SECONDS) -> str:
         except Exception:
             pass
     return "force-killed after grace period"
+
+
+# ------------------------------------------------------------------ disks --
+# `df` only reports mounted filesystems, so a brand-new unformatted disk is
+# invisible to it. `lsblk` lists every block device, which is how an unused
+# drive gets found.
+LSBLK = "lsblk -b -P -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT,MODEL 2>/dev/null"
+DF = "df -B1 --output=source,fstype,size,used,avail,pcent,target -x tmpfs -x devtmpfs 2>/dev/null"
+
+
+def _parse_lsblk(out: str) -> list[dict]:
+    """Parse `lsblk -P` key="value" pairs, one device per line."""
+    devs = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        d = dict(re.findall(r'(\w+)="([^"]*)"', line))
+        if not d.get("NAME"):
+            continue
+        try:
+            size = int(d.get("SIZE") or 0)
+        except ValueError:
+            size = 0
+        devs.append({
+            "name": d["NAME"], "size_bytes": size, "type": d.get("TYPE", ""),
+            "fstype": d.get("FSTYPE", ""), "label": d.get("LABEL", ""),
+            "mountpoint": d.get("MOUNTPOINT", ""), "model": (d.get("MODEL") or "").strip(),
+        })
+    return devs
+
+
+def _parse_df(out: str) -> list[dict]:
+    rows = []
+    for line in out.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 7:
+            continue
+        try:
+            size, used, avail = int(parts[2]), int(parts[3]), int(parts[4])
+        except ValueError:
+            continue
+        rows.append({"source": parts[0], "fstype": parts[1], "size_bytes": size,
+                     "used_bytes": used, "avail_bytes": avail, "use_pct": parts[5],
+                     "mount": " ".join(parts[6:])})
+    return rows
+
+
+def unused_disks(devices: list[dict]) -> list[dict]:
+    """Whole disks with no filesystem and no mounted partition - free capacity."""
+    out = []
+    for d in devices:
+        if d["type"] != "disk" or d["fstype"]:
+            continue
+        kids = [c for c in devices
+                if c["name"] != d["name"] and c["name"].startswith(d["name"])]
+        if any(c["fstype"] or c["mountpoint"] for c in kids):
+            continue          # partitioned and in use
+        out.append(d)
+    return out
+
+
+async def disk_report() -> dict:
+    """Disks and free space on whichever host runs the game servers."""
+    code_l, lsblk_out = await run_shell(LSBLK, timeout=30)
+    code_d, df_out = await run_shell(DF, timeout=30)
+    devices = _parse_lsblk(lsblk_out) if code_l == 0 else []
+    filesystems = _parse_df(df_out) if code_d == 0 else []
+    unused = unused_disks(devices)
+
+    best = max(filesystems, key=lambda f: f["avail_bytes"], default=None)
+    return {
+        "host": f"{SSH_USER}@{SSH_HOST}" if remote() else "backend host",
+        "remote": remote(),
+        "devices": devices,
+        "filesystems": filesystems,
+        "unused_disks": unused,
+        "largest_free_bytes": best["avail_bytes"] if best else 0,
+        "largest_free_mount": best["mount"] if best else None,
+        "install_root": str(BASE_DIR),
+        "error": None if (code_l == 0 or code_d == 0) else (lsblk_out or df_out)[:300],
+    }
+
+
+def fits(report: dict, needed_bytes: int) -> tuple[bool, str]:
+    """Does a planned install fit where servers actually get installed?"""
+    root = str(BASE_DIR)
+    target = None
+    for f in sorted(report.get("filesystems", []), key=lambda x: -len(x["mount"])):
+        if root == f["mount"] or root.startswith(f["mount"].rstrip("/") + "/"):
+            target = f
+            break
+    if not target:
+        return False, f"No filesystem found for {root}"
+    avail = target["avail_bytes"]
+    if avail >= needed_bytes:
+        return True, (f"{human_bytes(needed_bytes)} needed, "
+                      f"{human_bytes(avail)} free on {target['mount']}")
+    short = needed_bytes - avail
+    msg = (f"Not enough room: {human_bytes(needed_bytes)} needed, only "
+           f"{human_bytes(avail)} free on {target['mount']} "
+           f"(short {human_bytes(short)})")
+    spare = report.get("unused_disks") or []
+    if spare:
+        biggest = max(spare, key=lambda d: d["size_bytes"])
+        msg += (f". There is an unformatted {human_bytes(biggest['size_bytes'])} disk "
+                f"(/dev/{biggest['name']}) that could be formatted and mounted at {root}")
+    return False, msg
+
+
+def human_bytes(n: int) -> str:
+    n = float(n or 0)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(n) < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit in ("B", "KB") else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"

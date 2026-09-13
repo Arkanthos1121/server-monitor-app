@@ -199,6 +199,28 @@ def build(db):
         ok, msg = await svc.install(rec, actor=f"discord:{interaction.user}")
         await interaction.followup.send(msg)
 
+    @tree.command(name="disk", description="Free space on the gameserver, and any unused drives")
+    async def disk_cmd(interaction):
+        await interaction.response.defer(thinking=True)
+        rep = await gs.disk_report()
+        if rep.get("error"):
+            await interaction.followup.send(f"Could not read disks on {rep['host']}: {rep['error']}")
+            return
+        lines = [f"**Disks on {rep['host']}**"]
+        for f in sorted(rep["filesystems"], key=lambda x: -x["avail_bytes"]):
+            lines.append(f"  `{f['mount']}` — {gs.human_bytes(f['avail_bytes'])} free "
+                         f"of {gs.human_bytes(f['size_bytes'])} ({f['use_pct']} used)")
+        spare = rep.get("unused_disks") or []
+        if spare:
+            lines.append("")
+            lines.append("**Unused drives** (no filesystem — format before use):")
+            for d in spare:
+                model = f" · {d['model']}" if d["model"] else ""
+                lines.append(f"  `/dev/{d['name']}` — {gs.human_bytes(d['size_bytes'])}{model}")
+        lines.append("")
+        lines.append(f"Servers install to `{rep['install_root']}`.")
+        await interaction.followup.send("\n".join(lines)[:1900])
+
     @bot.event
     async def on_ready():
         try:

@@ -944,6 +944,12 @@ async def delete_gameserver(server_id: str, user: dict = Depends(get_current_use
     return {"status": "deleted"}
 
 
+@api.get("/gameservers/disk")
+async def gameserver_disk(user: dict = Depends(get_current_user)):
+    """Disks and free space on the host that runs the game servers."""
+    return await gs.disk_report()
+
+
 # =========================== Auto-stop reaper ===============================
 async def reaper_loop():
     """Enforce the auto-stop deadline and warn in Discord shortly beforehand."""
