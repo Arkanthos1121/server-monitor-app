@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, Switch, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 
 import { useAuth } from "@/src/context/AuthContext";
 import { api, User } from "@/src/lib/api";
@@ -143,6 +144,15 @@ export default function Settings() {
         </Text>
       ) : null}
 
+      <Pressable style={styles.navRow} onPress={() => router.push("/steam")} testID="steam-scan-link">
+        <Ionicons name="game-controller-outline" size={18} color={colors.brand} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.navLabel}>STEAM DEDICATED SERVERS</Text>
+          <Text style={styles.navHint}>Find which of your games can be self-hosted</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceSecondary} />
+      </Pressable>
+
       <Pressable style={styles.logout} onPress={logout} testID="logout-button">
         <Ionicons name="log-out-outline" size={18} color={colors.error} />
         <Text style={styles.logoutText}>DISCONNECT SESSION</Text>
@@ -184,6 +194,9 @@ const styles = StyleSheet.create({
   segmentItemActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   segmentText: { fontFamily: fonts.monoMedium, fontSize: 14, color: colors.onSurfaceSecondary },
   segmentTextActive: { color: colors.onBrand },
+  navRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.xl, padding: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary },
+  navLabel: { fontFamily: fonts.monoMedium, fontSize: 13, color: colors.onSurface, letterSpacing: 1 },
+  navHint: { fontFamily: fonts.body, fontSize: 11, color: colors.onSurfaceSecondary, marginTop: 2 },
   logout: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, marginTop: spacing.xl, paddingVertical: spacing.md, borderWidth: 1, borderColor: colors.error, borderRadius: radius.md },
   logoutText: { fontFamily: fonts.monoMedium, fontSize: 13, color: colors.error, letterSpacing: 1 },
   version: { fontFamily: fonts.mono, fontSize: 11, color: colors.onSurfaceSecondary, textAlign: "center", marginTop: spacing.xl },

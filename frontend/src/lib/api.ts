@@ -120,3 +120,39 @@ export type User = {
   alerts_enabled: boolean;
   poll_interval_minutes: number;
 };
+
+export type DedicatedGame = {
+  appid: number;
+  name: string;
+  playtime_min: number;
+  server_name: string | null;
+  server_appid: number | null;
+  bundled: boolean;
+  how: "catalog" | "appinfo";
+};
+
+export type SteamScan = {
+  total_games: number;
+  dedicated_capable: DedicatedGame[];
+  unmatched: number;
+  deep: boolean;
+  scanned_at?: string;
+  steamid?: string;
+};
+
+export type GameServer = {
+  id: string;
+  name: string;
+  game_name: string | null;
+  game_appid: number | null;
+  server_appid: number | null;
+  status: "stopped" | "starting" | "running" | "stopping" | "installing";
+  port: number | null;
+  max_players: number | null;
+  installed: boolean;
+  keepalive: boolean;
+  started_at: string | null;
+  auto_stop_at: string | null;
+  auto_stop_in: string | null;
+  last_message: string | null;
+};
