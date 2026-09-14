@@ -17,14 +17,20 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+import rcon
 from steam import profiles
 
-AUTO_STOP_HOURS = int(os.environ.get("GAMESERVER_AUTO_STOP_HOURS", "12"))
+# Hours a server may sit EMPTY before it is shut down. The clock measures idle
+# time, not uptime: a server with players on it is never reaped.
+AUTO_STOP_HOURS = int(os.environ.get("GAMESERVER_IDLE_STOP_HOURS",
+                      os.environ.get("GAMESERVER_AUTO_STOP_HOURS", "12")))
 MAX_EXTEND_HOURS = int(os.environ.get("GAMESERVER_MAX_EXTEND_HOURS", "24"))
 WARN_BEFORE_MIN = int(os.environ.get("GAMESERVER_WARN_BEFORE_MIN", "15"))
 BASE_DIR = Path(os.environ.get("GAMESERVER_BASE_DIR", "/opt/gameservers"))
 STEAMCMD = os.environ.get("STEAMCMD_PATH", "steamcmd")
 STOP_GRACE_SECONDS = int(os.environ.get("GAMESERVER_STOP_GRACE", "30"))
+# Longer than a plain stop: the engine has to finish writing the world.
+SAVE_STOP_GRACE = int(os.environ.get("GAMESERVER_SAVE_STOP_GRACE", "120"))
 
 # Where the servers actually run. Blank = same host as the backend. Set these to
 # drive a separate x86_64 box (the "gameserver") while the backend lives
@@ -33,6 +39,13 @@ SSH_HOST = os.environ.get("GAMESERVER_SSH_HOST", "").strip()
 SSH_USER = os.environ.get("GAMESERVER_SSH_USER", "steam").strip()
 SSH_PORT = os.environ.get("GAMESERVER_SSH_PORT", "22").strip()
 SSH_KEY = os.environ.get("GAMESERVER_SSH_KEY", "").strip()
+
+# Windows-only servers (ARK: Survival Ascended, Space Engineers) run on Linux
+# through a compatibility layer. Steam must also be told to fetch the Windows
+# depots, since SteamCMD otherwise serves the host platform's build.
+PROTON_PATH = os.environ.get("PROTON_PATH", "/opt/proton/proton")
+WINE_PATH = os.environ.get("WINE_PATH", "wine")
+STEAM_ROOT = os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH", "/opt/steam")
 
 
 def remote() -> bool:
@@ -68,32 +81,84 @@ def now_utc() -> datetime:
 
 # ------------------------------------------------------------- deadlines ----
 def initial_deadline(start: Optional[datetime] = None) -> datetime:
+    """Kept for callers that still want a wall-clock cap from a start time."""
     return (start or now_utc()) + timedelta(hours=AUTO_STOP_HOURS)
 
 
 def extended_deadline(hours: float, frm: Optional[datetime] = None) -> datetime:
-    """Extend relative to now. Clamped so one command can't pin a box forever."""
+    """Suppress idle shutdown until this time. Relative to now, and clamped."""
     hours = max(0.25, min(float(hours), MAX_EXTEND_HOURS))
     return (frm or now_utc()) + timedelta(hours=hours)
 
 
+def _dt(value) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def occupancy_patch(rec: dict, players: Optional[int],
+                    ref: Optional[datetime] = None) -> dict:
+    """Fields to persist after a player-count poll.
+
+    players > 0  -> occupied; the idle clock stops and resets.
+    players == 0 -> empty; the idle clock starts (or keeps running).
+    players None -> the server can't be queried. The count is left unknown and
+                    the idle clock falls back to running from server start, so
+                    an unqueryable server still shuts down eventually instead of
+                    running forever.
+    """
+    ref = ref or now_utc()
+    if players is None:
+        patch = {"players_known": False}
+        if not rec.get("empty_since"):
+            patch["empty_since"] = (rec.get("started_at") or ref.isoformat())
+        return patch
+    if players > 0:
+        return {"players_online": players, "players_known": True, "empty_since": None}
+    patch = {"players_online": 0, "players_known": True}
+    if not rec.get("empty_since"):
+        patch["empty_since"] = ref.isoformat()
+    return patch
+
+
+def idle_seconds(rec: dict, ref: Optional[datetime] = None) -> Optional[float]:
+    """How long the server has had nobody on it. None while occupied."""
+    if rec.get("players_online"):
+        return None
+    since = _dt(rec.get("empty_since"))
+    if not since:
+        return None
+    return ((ref or now_utc()) - since).total_seconds()
+
+
 def remaining_seconds(rec: dict, ref: Optional[datetime] = None) -> Optional[float]:
-    """Seconds until auto-stop. None when pinned by keepalive or not running."""
+    """Seconds until idle shutdown. None when it isn't on a clock at all."""
     if rec.get("keepalive"):
         return None
-    dl = rec.get("auto_stop_at")
-    if not dl:
+    grace = _dt(rec.get("idle_grace_until"))
+    ref = ref or now_utc()
+    if grace and grace > ref:
+        return (grace - ref).total_seconds()
+    idle = idle_seconds(rec, ref)
+    if idle is None:
         return None
-    if isinstance(dl, str):
-        dl = datetime.fromisoformat(dl)
-    if dl.tzinfo is None:
-        dl = dl.replace(tzinfo=timezone.utc)
-    return (dl - (ref or now_utc())).total_seconds()
+    return AUTO_STOP_HOURS * 3600 - idle
 
 
 def is_due(rec: dict, ref: Optional[datetime] = None) -> bool:
+    """Should the reaper stop this server now?"""
     if rec.get("status") != "running" or rec.get("keepalive"):
         return False
+    if rec.get("players_online"):
+        return False          # never shut down an occupied server
     rem = remaining_seconds(rec, ref)
     return rem is not None and rem <= 0
 
@@ -167,24 +232,44 @@ def build_launch(rec: dict) -> Optional[str]:
     prof = profiles.get(rec.get("server_appid"))
     if not prof:
         return None
-    binary = prof["linux"] if os.name != "nt" else prof["windows"]
+    run_with = profiles.runner(rec)
+    # Under Proton/Wine we launch the *Windows* binary even though the host is Linux.
+    if run_with in ("proton", "wine"):
+        binary = prof["windows"]
+    else:
+        binary = prof["linux"] if os.name != "nt" else prof["windows"]
     if not binary:
         return None
+
     d = install_dir(rec)
     args = prof["args"].format(
         dir=d, name=rec.get("name", "server"), port=rec.get("port") or prof["port"],
         password=rec.get("server_password") or "changeme",
         players=rec.get("max_players") or prof["players"],
     )
-    return f"{shlex.quote(str(d / binary))} {args}".strip()
+    exe = shlex.quote(str(d / binary))
+
+    if run_with == "proton":
+        prefix = shlex.quote(str(d / "compatdata"))
+        return (f"STEAM_COMPAT_DATA_PATH={prefix} "
+                f"STEAM_COMPAT_CLIENT_INSTALL_PATH={shlex.quote(STEAM_ROOT)} "
+                f"{shlex.quote(PROTON_PATH)} run {exe} {args}").strip()
+    if run_with == "wine":
+        prefix = shlex.quote(str(d / "wineprefix"))
+        return f"WINEPREFIX={prefix} {shlex.quote(WINE_PATH)} {exe} {args}".strip()
+    return f"{exe} {args}".strip()
 
 
 async def steamcmd_install(rec: dict, validate: bool = False) -> tuple[bool, str]:
     """Install or update the server's Steam app. Returns (ok, tail_of_output)."""
     d = install_dir(rec)
     d.mkdir(parents=True, exist_ok=True)
+    # +@sSteamCmdForcePlatformType must precede +login to take effect.
+    platform = ""
+    if profiles.runner(rec) in ("proton", "wine"):
+        platform = "+@sSteamCmdForcePlatformType windows "
     cmd = (f"mkdir -p {shlex.quote(str(d))} && {shlex.quote(STEAMCMD)} "
-           f"+force_install_dir {shlex.quote(str(d))} +login anonymous "
+           f"{platform}+force_install_dir {shlex.quote(str(d))} +login anonymous "
            f"+app_update {int(rec['server_appid'])}{' validate' if validate else ''} +quit")
     code, out = await run_shell(cmd)
     if code == 127:
@@ -363,3 +448,35 @@ def human_bytes(n: int) -> str:
             return f"{n:.0f} {unit}" if unit in ("B", "KB") else f"{n:.1f} {unit}"
         n /= 1024
     return f"{n:.1f} TB"
+
+
+# ------------------------------------------------------------ save/stop ----
+async def save_world(rec: dict) -> tuple[bool, str]:
+    """Ask the server to flush its world to disk, if it speaks RCON.
+
+    Returns (attempted, message). A game with no RCON save is not a failure -
+    its engine saves when SIGTERM arrives.
+    """
+    spec = profiles.save_command(rec)
+    if not spec:
+        return False, "no RCON save for this game; relying on save-on-exit"
+    port, command = spec
+    password = rec.get("rcon_password") or rec.get("server_password")
+    if not password:
+        return False, "no RCON password configured; relying on save-on-exit"
+    host = SSH_HOST if remote() else "127.0.0.1"
+    ok, msg = await rcon.save_world(host, port or 27020, password, command)
+    return True, msg if ok else f"save failed ({msg}); stopping anyway"
+
+
+async def save_then_stop(rec: dict, grace: int = None) -> str:
+    """Save the world, then shut the server down cleanly.
+
+    The grace period is deliberately generous: a large ARK or 7 Days world can
+    take tens of seconds to flush, and killing mid-write is how saves corrupt.
+    """
+    attempted, save_msg = await save_world(rec)
+    if grace is None:
+        grace = SAVE_STOP_GRACE
+    how = await terminate(rec["pid"], grace=grace)
+    return f"{how} ({save_msg})" if attempted else how

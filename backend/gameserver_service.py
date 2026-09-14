@@ -6,13 +6,20 @@ the status transitions behave identically no matter where a command came from.
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from typing import Optional
+
+import a2s
+from datetime import timedelta
 
 import gameservers as gs
 from steam import profiles
 
 logger = logging.getLogger("webminpulse.gameservers")
+
+# How long people get to object before a requested stop goes through.
+STOP_REQUEST_SECONDS = int(os.environ.get("GAMESERVER_STOP_NOTICE_SECONDS", "300"))
 
 _db = None
 
@@ -33,6 +40,10 @@ def public(rec: dict) -> dict:
         "started_at": rec.get("started_at"),
         "auto_stop_at": rec.get("auto_stop_at"),
         "auto_stop_in": gs.fmt_remaining(rem) if rec.get("status") == "running" else None,
+        "players_online": rec.get("players_online"),
+        "players_known": rec.get("players_known", False),
+        "empty_since": rec.get("empty_since"),
+        "pending_stop": rec.get("pending_stop"),
         "last_message": rec.get("last_message"),
     }
 
@@ -98,24 +109,46 @@ async def start(rec: dict, actor: str = "api") -> tuple[bool, str]:
     await _db.gameservers.update_one({"id": rec["id"]}, {"$set": {
         "status": "running", "pid": pid, "pid_start_ticks": ticks,
         "started_at": started.isoformat(), "auto_stop_at": deadline.isoformat(),
-        "warned_at": None, "last_message": msg}})
+        "warned_at": None, "last_message": msg,
+        "players_online": 0, "players_known": False, "pending_stop": None,
+        "idle_grace_until": None,
+        # A freshly started server is empty; the idle clock starts now.
+        "empty_since": started.isoformat()}})
     await _audit(rec, "start", actor, f"pid={pid}")
     return True, (f"**{rec['name']}** is starting on port {rec.get('port')}.\n"
-                  f"It will auto-stop in {gs.AUTO_STOP_HOURS}h "
-                  f"— use `/extend {rec['name']}` to keep it up longer.")
+                  f"It shuts down after {gs.AUTO_STOP_HOURS}h with nobody on it. "
+                  f"Playing keeps it alive — no command needed.")
 
 
-async def stop(rec: dict, actor: str = "api", reason: str = "") -> tuple[bool, str]:
+async def stop(rec: dict, actor: str = "api", reason: str = "",
+               force: bool = False) -> tuple[bool, str]:
+    """Stop a server, saving its world first.
+
+    Refuses while people are playing unless forced - that guard is the whole
+    anti-griefing mechanism, so it lives here rather than in one UI.
+    """
     rec = await reconcile(rec)
     if rec.get("status") != "running":
         return False, f"**{rec['name']}** is not running."
+
+    online = rec.get("players_online") or 0
+    if online > 0 and not force:
+        who = "1 person is" if online == 1 else f"{online} people are"
+        return False, (f"{who} playing on **{rec['name']}** right now.\n"
+                       f"Use `/requeststop {rec['name']}` to ask them to wrap up, "
+                       f"or an admin can `/stop {rec['name']} force:True`.")
+
     await _db.gameservers.update_one({"id": rec["id"]}, {"$set": {"status": "stopping"}})
-    how = await gs.terminate(rec["pid"])
+    how = await gs.save_then_stop(rec)
     await _db.gameservers.update_one({"id": rec["id"]}, {"$set": {
         "status": "stopped", "pid": None, "auto_stop_at": None, "warned_at": None,
+        "players_online": 0, "empty_since": None, "pending_stop": None,
+        "idle_grace_until": None,
         "last_message": f"{how}{(' (' + reason + ')') if reason else ''}"}})
-    await _audit(rec, "stop", actor, reason or how)
-    return True, f"**{rec['name']}** stopped ({how})."
+    await _audit(rec, "force_stop" if (force and online) else "stop", actor,
+                 reason or how)
+    note = f" (forced past {online} online)" if (force and online) else ""
+    return True, f"**{rec['name']}** stopped{note} — world saved. ({how})"
 
 
 async def extend(rec: dict, hours: float, actor: str = "api") -> tuple[bool, str]:
@@ -124,18 +157,20 @@ async def extend(rec: dict, hours: float, actor: str = "api") -> tuple[bool, str
         return False, f"**{rec['name']}** is not running, so there's nothing to extend."
     deadline = gs.extended_deadline(hours)
     await _db.gameservers.update_one({"id": rec["id"]}, {"$set": {
+        "idle_grace_until": deadline.isoformat(),
         "auto_stop_at": deadline.isoformat(), "warned_at": None}})
     await _audit(rec, "extend", actor, f"{hours}h")
-    granted = gs.remaining_seconds({"auto_stop_at": deadline, "keepalive": False})
-    return True, (f"**{rec['name']}** will now stay up for {gs.fmt_remaining(granted)} "
+    granted = gs.remaining_seconds({"idle_grace_until": deadline, "keepalive": False})
+    return True, (f"**{rec['name']}** will stay up for at least "
+                  f"{gs.fmt_remaining(granted)} even while empty "
                   f"(max {gs.MAX_EXTEND_HOURS}h per extension).")
 
 
 async def set_keepalive(rec: dict, on: bool, actor: str = "api") -> tuple[bool, str]:
     patch = {"keepalive": on}
     if not on and rec.get("status") == "running":
-        # Coming off keepalive restarts the clock rather than stopping instantly.
-        patch["auto_stop_at"] = gs.initial_deadline().isoformat()
+        # Coming off keepalive restarts the idle clock rather than stopping instantly.
+        patch["empty_since"] = gs.now_utc().isoformat()
     await _db.gameservers.update_one({"id": rec["id"]}, {"$set": patch})
     await _audit(rec, "keepalive_on" if on else "keepalive_off", actor)
     if on:
@@ -204,3 +239,78 @@ async def reap() -> list[tuple[dict, str]]:
                 logger.info(f"auto-stopped {r['name']} ({gs.AUTO_STOP_HOURS}h limit)")
                 stopped.append((r, msg))
     return stopped
+
+
+# ----------------------------------------------------------- occupancy -----
+async def poll_occupancy(rec: dict) -> dict:
+    """Ask the server how many people are on it and persist the result."""
+    port = profiles.query_port(rec)
+    if not port:
+        return rec
+    host = gs.SSH_HOST if gs.remote() else "127.0.0.1"
+    players = await a2s.player_count(host, port)
+    patch = gs.occupancy_patch(rec, players)
+    if patch:
+        await _db.gameservers.update_one({"id": rec["id"]}, {"$set": patch})
+        rec = {**rec, **patch}
+    return rec
+
+
+async def poll_all_occupancy() -> list[dict]:
+    rows = await _db.gameservers.find({"status": "running"}, {"_id": 0}).to_list(500)
+    out = []
+    for r in rows:
+        out.append(await poll_occupancy(await reconcile(r)))
+    return out
+
+
+# -------------------------------------------------- stop requests / veto ---
+async def request_stop(rec: dict, actor: str, seconds: int = None) -> tuple[bool, str]:
+    """Ask to stop an occupied server, giving the people on it a chance to object.
+
+    This is the middle path between "anyone can kill your session" and "only
+    admins can stop anything": the request is public, it waits, and any player
+    can cancel it.
+    """
+    rec = await reconcile(rec)
+    if rec.get("status") != "running":
+        return False, f"**{rec['name']}** is not running."
+    seconds = seconds or STOP_REQUEST_SECONDS
+    if not rec.get("players_online"):
+        ok, msg = await stop(rec, actor=actor, reason="empty at request time")
+        return ok, msg
+    if rec.get("pending_stop"):
+        return False, f"A stop request for **{rec['name']}** is already running."
+
+    due = gs.now_utc() + timedelta(seconds=seconds)
+    pending = {"by": actor, "requested_at": gs.now_utc().isoformat(),
+               "due_at": due.isoformat()}
+    await _db.gameservers.update_one({"id": rec["id"]}, {"$set": {"pending_stop": pending}})
+    await _audit(rec, "stop_requested", actor, f"{seconds}s notice")
+    mins = max(1, seconds // 60)
+    return True, (f"⏳ {actor} asked to stop **{rec['name']}** in {mins} min "
+                  f"({rec['players_online']} online).\n"
+                  f"Anyone on the server can cancel with `/keepplaying {rec['name']}`.")
+
+
+async def cancel_stop(rec: dict, actor: str) -> tuple[bool, str]:
+    rec = await reconcile(rec)
+    if not rec.get("pending_stop"):
+        return False, f"No stop request is pending for **{rec['name']}**."
+    await _db.gameservers.update_one({"id": rec["id"]}, {"$set": {"pending_stop": None}})
+    await _audit(rec, "stop_cancelled", actor)
+    return True, f"✋ {actor} cancelled the stop request for **{rec['name']}**. Carry on."
+
+
+async def due_stop_requests() -> list[dict]:
+    """Stop requests whose notice period has elapsed."""
+    rows = await _db.gameservers.find({"status": "running"}, {"_id": 0}).to_list(500)
+    out = []
+    for r in rows:
+        pending = r.get("pending_stop")
+        if not pending:
+            continue
+        due = gs._dt(pending.get("due_at"))
+        if due and due <= gs.now_utc():
+            out.append(r)
+    return out

@@ -116,7 +116,10 @@ def build(db):
             bits = [f"{icon} **{r['name']}** — {r.get('game_name') or 'unknown game'}"]
             if r.get("status") == "running":
                 rem = gs.fmt_remaining(gs.remaining_seconds(r))
-                bits.append(f"port {r.get('port')} · auto-stop in {rem}")
+                if r.get("players_online"):
+                    bits.append(f"port {r.get('port')} · {r['players_online']} playing")
+                else:
+                    bits.append(f"port {r.get('port')} · empty, stops in {rem}")
             elif not r.get("installed"):
                 bits.append("not installed")
             lines.append("\n".join(["  ".join(bits[:1]), f"   ↳ {bits[1]}" if len(bits) > 1 else ""]).rstrip())
@@ -138,21 +141,71 @@ def build(db):
         ok, msg = await svc.start(rec, actor=f"discord:{interaction.user}")
         await interaction.followup.send(msg)
 
-    @tree.command(name="stop", description="Stop a running game server")
-    @app_commands.describe(server="Which server to stop")
+    @tree.command(name="stop", description="Stop a server (refuses if people are playing)")
+    @app_commands.describe(server="Which server to stop",
+                           force="Admins only: stop even with players online")
     @app_commands.autocomplete(server=server_names)
-    async def stop_cmd(interaction, server: str):
-        if not _permitted(interaction):
-            await interaction.response.send_message(
-                f"You need the **{ALLOWED_ROLE}** role to do that.", ephemeral=True)
-            return
+    async def stop_cmd(interaction, server: str, force: bool = False):
         await interaction.response.defer(thinking=True)
         rec, err = await _resolve(interaction, server)
         if err:
             await interaction.followup.send(err)
             return
-        ok, msg = await svc.stop(rec, actor=f"discord:{interaction.user}", reason="stopped from Discord")
+        if force and not _permitted(interaction):
+            await interaction.followup.send(
+                f"Only **{ALLOWED_ROLE}** can force a stop past players. "
+                f"Try `/requeststop {rec['name']}` instead.")
+            return
+        actor = f"discord:{interaction.user}"
+        ok, msg = await svc.stop(rec, actor=actor, reason="stopped from Discord", force=force)
         await interaction.followup.send(msg)
+        if ok and force and rec.get("players_online"):
+            # Forcing people offline is public, so it can't be done quietly.
+            await announce(f"⚠️ {interaction.user} force-stopped **{rec['name']}** "
+                           f"with {rec['players_online']} online.")
+
+    @tree.command(name="requeststop", description="Ask to stop a server people are on")
+    @app_commands.describe(server="Which server")
+    @app_commands.autocomplete(server=server_names)
+    async def requeststop_cmd(interaction, server: str):
+        await interaction.response.defer(thinking=True)
+        rec, err = await _resolve(interaction, server)
+        if err:
+            await interaction.followup.send(err)
+            return
+        ok, msg = await svc.request_stop(rec, actor=f"discord:{interaction.user}")
+        await interaction.followup.send(msg)
+
+    @tree.command(name="keepplaying", description="Cancel a pending stop - you're still playing")
+    @app_commands.describe(server="Which server")
+    @app_commands.autocomplete(server=server_names)
+    async def keepplaying_cmd(interaction, server: str):
+        await interaction.response.defer(thinking=True)
+        rec, err = await _resolve(interaction, server)
+        if err:
+            await interaction.followup.send(err)
+            return
+        ok, msg = await svc.cancel_stop(rec, actor=f"discord:{interaction.user}")
+        await interaction.followup.send(msg)
+
+    @tree.command(name="players", description="Who is on which server right now")
+    async def players_cmd(interaction):
+        await interaction.response.defer(thinking=True)
+        rows = await svc.poll_all_occupancy()
+        if not rows:
+            await interaction.followup.send("No servers are running.")
+            return
+        lines = []
+        for r in rows:
+            if not r.get("players_known"):
+                who = "can't be queried"
+            elif r.get("players_online"):
+                who = f"**{r['players_online']}** online"
+            else:
+                idle = gs.idle_seconds(r)
+                who = f"empty for {gs.fmt_remaining(idle)}" if idle else "empty"
+            lines.append(f"{STATUS_ICON.get(r.get('status'), '⚪')} **{r['name']}** — {who}")
+        await interaction.followup.send("\n".join(lines)[:1900])
 
     @tree.command(name="extend", description="Keep a server up longer than its 12h limit")
     @app_commands.describe(server="Which server", hours="Extra hours from now (default 6)")

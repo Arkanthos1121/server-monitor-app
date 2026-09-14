@@ -68,6 +68,7 @@ def db(monkeypatch):
     # Never touch real processes in tests.
     monkeypatch.setattr(gs, "spawn", _fake_spawn)
     monkeypatch.setattr(gs, "terminate", _fake_terminate)
+    monkeypatch.setattr(gs, "save_then_stop", _fake_save_then_stop)
     monkeypatch.setattr(gs, "alive", _fake_alive)
     monkeypatch.setattr(gs, "is_alive", lambda pid, ticks=None: pid == 4242)
     return d
@@ -79,6 +80,14 @@ async def _fake_spawn(rec):
 
 async def _fake_terminate(pid, grace=30):
     return "stopped cleanly"
+
+
+async def _fake_save_then_stop(rec, grace=None):
+    saved.append(rec["id"])
+    return "stopped cleanly (world saved)"
+
+
+saved: list = []
 
 
 async def _fake_alive(rec):
@@ -97,20 +106,31 @@ async def reload(db, rec):
     return await db.gameservers.find_one({"id": rec["id"]})
 
 
-def shift(db, rec, **delta):
-    """Rewind a server's deadline to simulate time passing."""
-    dl = gs.now_utc() - timedelta(**delta)
-    return db.gameservers.update_one({"id": rec["id"]}, {"$set": {"auto_stop_at": dl.isoformat()}})
+def idle_for(db, rec, **delta):
+    """Backdate empty_since to simulate the server sitting empty that long."""
+    when = gs.now_utc() - timedelta(**delta)
+    return db.gameservers.update_one(
+        {"id": rec["id"]},
+        {"$set": {"empty_since": when.isoformat(), "players_online": 0,
+                  "players_known": True}})
+
+
+def occupy(db, rec, players=2):
+    return db.gameservers.update_one(
+        {"id": rec["id"]},
+        {"$set": {"players_online": players, "players_known": True,
+                  "empty_since": None}})
 
 
 # -------------------------------------------------------------- the flow ---
 @pytest.mark.asyncio
-async def test_start_sets_twelve_hour_deadline(db):
+async def test_start_begins_the_idle_clock(db):
     rec = await make(db)
     ok, msg = await svc.start(rec, actor="discord:tester")
-    assert ok and "auto-stop in 12h" in msg
+    assert ok and "12h with nobody on it" in msg
     rec = await reload(db, rec)
     assert rec["status"] == "running" and rec["pid"] == 4242
+    assert rec["empty_since"] and rec["players_online"] == 0
     rem = gs.remaining_seconds(rec)
     assert 11.9 * 3600 < rem <= 12 * 3600
 
@@ -131,13 +151,26 @@ async def test_cannot_start_uninstalled(db):
 
 
 @pytest.mark.asyncio
-async def test_reaper_stops_server_past_twelve_hours(db):
+async def test_reaper_stops_a_server_idle_for_twelve_hours(db):
     rec = await make(db)
     await svc.start(rec)
-    await shift(db, rec, minutes=1)          # deadline now in the past
+    await idle_for(db, rec, hours=12, minutes=1)
     stopped = await svc.reap()
     assert len(stopped) == 1
     assert (await reload(db, rec))["status"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_reaper_leaves_an_occupied_server_alone_forever(db):
+    """A server that has run for days with people on it must not be reaped."""
+    rec = await make(db)
+    await svc.start(rec)
+    await occupy(db, rec, players=3)
+    await db.gameservers.update_one(
+        {"id": rec["id"]},
+        {"$set": {"started_at": (gs.now_utc() - timedelta(days=4)).isoformat()}})
+    assert await svc.reap() == []
+    assert (await reload(db, rec))["status"] == "running"
 
 
 @pytest.mark.asyncio
@@ -150,10 +183,10 @@ async def test_reaper_leaves_server_inside_window(db):
 
 @pytest.mark.asyncio
 async def test_extend_saves_a_server_from_the_reaper(db):
-    """The requested escape hatch: extend before the limit and it stays up."""
+    """The escape hatch: extend before the limit and it stays up."""
     rec = await make(db)
     await svc.start(rec)
-    await shift(db, rec, minutes=1)          # about to be reaped
+    await idle_for(db, rec, hours=12, minutes=1)   # about to be reaped
     ok, msg = await svc.extend(await reload(db, rec), 3, actor="discord:tester")
     assert ok and ("2h 59m" in msg or "3h 0m" in msg)
     assert await svc.reap() == []
@@ -165,7 +198,7 @@ async def test_keepalive_survives_the_reaper(db):
     rec = await make(db)
     await svc.start(rec)
     await svc.set_keepalive(await reload(db, rec), True)
-    await shift(db, rec, hours=48)
+    await idle_for(db, rec, hours=48)
     assert await svc.reap() == []
     assert (await reload(db, rec))["status"] == "running"
 
@@ -191,7 +224,7 @@ async def test_extend_on_stopped_server_is_refused(db):
 async def test_warning_fires_once_inside_the_window(db):
     rec = await make(db)
     await svc.start(rec)
-    await shift(db, rec, hours=-0.1)         # ~6 min of life left
+    await idle_for(db, rec, hours=11, minutes=54)   # ~6 min of idle left
     due = await svc.due_for_warning()
     assert len(due) == 1
     await svc.mark_warned(due[0])
@@ -226,3 +259,137 @@ async def test_find_resolves_by_name_and_partial(db):
     assert (await svc.find("u1", "valheim-main"))["id"] == rec["id"]
     assert (await svc.find("u1", "VALHEIM"))["id"] == rec["id"]
     assert (await svc.find("u1", "nope")) is None
+
+
+# ------------------------------------------- griefing protection -----------
+@pytest.mark.asyncio
+async def test_cannot_stop_a_server_someone_is_playing_on(db):
+    """The core protection: a friend cannot kill your session out from under you."""
+    rec = await make(db)
+    await svc.start(rec)
+    await occupy(db, rec, players=2)
+    ok, msg = await svc.stop(await reload(db, rec), actor="discord:griefer")
+    assert not ok
+    assert "2 people are playing" in msg
+    assert "requeststop" in msg
+    assert (await reload(db, rec))["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_singular_wording_for_one_player(db):
+    rec = await make(db)
+    await svc.start(rec)
+    await occupy(db, rec, players=1)
+    _ok, msg = await svc.stop(await reload(db, rec), actor="discord:griefer")
+    assert "1 person is playing" in msg
+
+
+@pytest.mark.asyncio
+async def test_empty_server_stops_with_no_friction(db):
+    """Swapping ASA out for Space Engineers must stay a one-command action."""
+    rec = await make(db)
+    await svc.start(rec)
+    ok, msg = await svc.stop(await reload(db, rec), actor="discord:jeff")
+    assert ok and "world saved" in msg.lower()
+    assert (await reload(db, rec))["status"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_admin_can_force_past_players(db):
+    rec = await make(db)
+    await svc.start(rec)
+    await occupy(db, rec, players=3)
+    ok, msg = await svc.stop(await reload(db, rec), actor="discord:admin", force=True)
+    assert ok and "forced past 3 online" in msg
+    assert (await reload(db, rec))["status"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_forcing_is_recorded_separately_in_the_audit_log(db):
+    """A force-stop should be attributable, so griefing has a name on it."""
+    rec = await make(db)
+    await svc.start(rec)
+    await occupy(db, rec, players=3)
+    await svc.stop(await reload(db, rec), actor="discord:admin", force=True)
+    events = await db.gameserver_events.find({"server_id": rec["id"]}).to_list(50)
+    forced = [e for e in events if e["action"] == "force_stop"]
+    assert len(forced) == 1 and forced[0]["actor"] == "discord:admin"
+
+
+@pytest.mark.asyncio
+async def test_request_stop_gives_players_notice(db):
+    rec = await make(db)
+    await svc.start(rec)
+    await occupy(db, rec, players=2)
+    ok, msg = await svc.request_stop(await reload(db, rec), actor="discord:jeff")
+    assert ok and "keepplaying" in msg
+    pending = (await reload(db, rec))["pending_stop"]
+    assert pending["by"] == "discord:jeff"
+    assert (await reload(db, rec))["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_a_player_can_veto_the_stop_request(db):
+    rec = await make(db)
+    await svc.start(rec)
+    await occupy(db, rec, players=2)
+    await svc.request_stop(await reload(db, rec), actor="discord:jeff")
+    ok, msg = await svc.cancel_stop(await reload(db, rec), actor="discord:friend")
+    assert ok and "cancelled" in msg
+    assert (await reload(db, rec))["pending_stop"] is None
+    assert await svc.due_stop_requests() == []
+
+
+@pytest.mark.asyncio
+async def test_request_on_an_empty_server_stops_it_immediately(db):
+    rec = await make(db)
+    await svc.start(rec)
+    ok, msg = await svc.request_stop(await reload(db, rec), actor="discord:jeff")
+    assert ok
+    assert (await reload(db, rec))["status"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_stop_request_comes_due_after_the_notice_period(db):
+    rec = await make(db)
+    await svc.start(rec)
+    await occupy(db, rec, players=2)
+    await svc.request_stop(await reload(db, rec), actor="discord:jeff", seconds=300)
+    assert await svc.due_stop_requests() == []          # not yet
+    past = (gs.now_utc() - timedelta(seconds=1)).isoformat()
+    cur = await reload(db, rec)
+    await db.gameservers.update_one(
+        {"id": rec["id"]},
+        {"$set": {"pending_stop": {**cur["pending_stop"], "due_at": past}}})
+    due = await svc.due_stop_requests()
+    assert len(due) == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_stop_requests_are_refused(db):
+    rec = await make(db)
+    await svc.start(rec)
+    await occupy(db, rec, players=2)
+    await svc.request_stop(await reload(db, rec), actor="discord:jeff")
+    ok, msg = await svc.request_stop(await reload(db, rec), actor="discord:other")
+    assert not ok and "already running" in msg
+
+
+@pytest.mark.asyncio
+async def test_world_is_saved_before_every_stop(db):
+    saved.clear()
+    rec = await make(db)
+    await svc.start(rec)
+    await svc.stop(await reload(db, rec), actor="discord:jeff")
+    assert saved == [rec["id"]]
+
+
+@pytest.mark.asyncio
+async def test_auto_stop_also_saves_the_world(db):
+    """The 12h reaper must not be the one path that loses progress."""
+    saved.clear()
+    rec = await make(db)
+    await svc.start(rec)
+    await idle_for(db, rec, hours=12, minutes=1)
+    await svc.reap()
+    assert saved == [rec["id"]]

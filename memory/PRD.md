@@ -147,3 +147,41 @@ updates and notify. (User asked to pause and check in at ~50 credits.)
 - Steam's community games page now returns a Sign In shell to datacenter IPs even for public
   profiles (verified against the user's own public profile, visibilityState 3, with a browser
   UA). There is NO credential-free way to read a library; the Web API key is required.
+
+## Idle Shutdown, Save-on-Stop, Griefing Protection, Proton/Wine (2026-09-14, session 7)
+- CORRECTION to session 6: auto-stop was uptime-based (12h after start). User clarified they want
+  12h with NOBODY ONLINE. Rewritten around idle time; an occupied server is never reaped.
+- `backend/a2s.py`: Steam A2S_INFO queries (UDP) incl. the modern challenge handshake. Bots are
+  subtracted from the player count. CRITICAL invariant: an unreachable/non-A2S server returns
+  None, never 0 — an unknown count must never be mistaken for empty or the reaper kills a live
+  server. 11 tests, incl. live UDP round-trips against a local fake server.
+- Idle model in gameservers.py: `empty_since` starts when the last player leaves and is cleared
+  when anyone joins; repeated empty polls do NOT push it. `occupancy_patch()` is the single place
+  that maps a poll result to persisted state. Unqueryable games (Palworld/Satisfactory use REST)
+  fall back to uptime so they still stop eventually. `idle_grace_until` backs /extend.
+- `backend/rcon.py`: Source RCON client. `save_then_stop()` sends the game's save command, waits
+  for ack, then SIGTERM with a 120s grace (vs 30s) so large ARK/7DTD worlds finish flushing.
+  save_cmd declared only for games that genuinely speak Source RCON (ARK SE/SA, 7DTD, Palworld);
+  Rust is WebSocket RCON and SE has no console, so those rely on save-on-exit. A failed save
+  never blocks a shutdown — it is reported.
+- Griefing protection gated on OCCUPANCY, not roles (a role gate would have broken the legitimate
+  ASA<->Space Engineers RAM swap): empty -> anyone stops it; occupied -> /stop refuses;
+  /requeststop gives 5 min notice and ANY player can /keepplaying to veto; admin force:True is
+  announced in-channel and audited as `force_stop` with the actor.
+- Proton/Wine runners: `runner` field on profiles. Install passes
+  `+@sSteamCmdForcePlatformType windows` (must precede +login); launch wraps the Windows binary
+  with Proton (STEAM_COMPAT_DATA_PATH) or Wine (WINEPREFIX). ARK: Survival Ascended -> proton,
+  Space Engineers -> wine.
+- New Discord commands: /players /requeststop /keepplaying, /stop gains force. /servers shows
+  occupancy. Reaper loop polls occupancy every 60s and executes un-vetoed stop requests.
+- 101 tests passing across 6 files.
+
+### Known Limitations
+- A2S query ports are per-game guesses (game port +1 by default, +0 for Source). Verify per
+  server; profiles can override with query_port.
+- RCON save needs a password on the record (rcon_password/server_password); without one it falls
+  back to SIGTERM save-on-exit.
+- /keepplaying can be run by anyone in the channel, not only by people actually on the server —
+  Discord identity is not linked to in-game identity. Acceptable for a friend group; would need
+  per-game player-name lookup (A2S_PLAYER) to tighten.
+- Proton/Wine paths are unverified against a real install (no x86_64 host in this session).

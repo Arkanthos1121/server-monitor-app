@@ -956,16 +956,28 @@ async def reaper_loop():
     await asyncio.sleep(15)
     while True:
         try:
+            # Ask every running server how many people are on it. This drives
+            # both the idle shutdown and the "don't stop an occupied server" guard.
+            await gsvc.poll_all_occupancy()
+
+            for rec in await gsvc.due_stop_requests():
+                ok, msg = await gsvc.stop(rec, actor="stop-request",
+                                          reason="requested stop, nobody objected",
+                                          force=True)
+                if ok:
+                    await discord_bot.announce(
+                        f"🛑 **{rec['name']}** stopped — nobody cancelled the request.")
+
             for rec in await gsvc.due_for_warning():
                 rem = gs.fmt_remaining(gs.remaining_seconds(rec))
                 await gsvc.mark_warned(rec)
                 await discord_bot.announce(
-                    f"⏳ **{rec['name']}** auto-stops in {rem}. "
-                    f"Use `/extend {rec['name']}` to keep it running.")
+                    f"⏳ **{rec['name']}** has been empty a while and stops in {rem}. "
+                    f"Join it or use `/extend {rec['name']}` to keep it up.")
             for rec, _msg in await gsvc.reap():
                 await discord_bot.announce(
-                    f"🛑 **{rec['name']}** hit the {gs.AUTO_STOP_HOURS}h limit and was stopped. "
-                    f"Use `/start {rec['name']}` to bring it back.")
+                    f"🛑 **{rec['name']}** sat empty for {gs.AUTO_STOP_HOURS}h — "
+                    f"world saved and shut down. `/start {rec['name']}` brings it back.")
         except Exception as e:
             logger.warning(f"reaper error: {e}")
         await asyncio.sleep(60)

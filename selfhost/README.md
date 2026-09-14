@@ -164,30 +164,70 @@ Leaving `DISCORD_BOT_TOKEN` blank disables the bot; everything else still runs.
 
 | Command | What it does |
 |---|---|
-| `/servers` | Every configured server, its status, and time left before auto-stop |
-| `/start <server>` | Start a server. Sets the 12-hour clock. |
-| `/stop <server>` | Stop it now |
-| `/extend <server> [hours]` | Push auto-stop out, measured **from now** (default 6h, max 24h) |
-| `/keepalive <server> [on]` | Exempt from auto-stop entirely; `off` re-arms the 12h timer |
+| `/servers` | Every configured server, its status, and who's on it |
+| `/players` | Live player counts across all running servers |
+| `/start <server>` | Start a server |
+| `/stop <server>` | Stop it — **refuses if anyone is playing** |
+| `/stop <server> force:True` | Admin override; announced publicly and audited |
+| `/requeststop <server>` | Ask players to wrap up; stops after 5 min unless cancelled |
+| `/keepplaying <server>` | Cancel a pending stop — anyone on the server can use this |
+| `/extend <server> [hours]` | Keep an empty server up anyway (default 6h, max 24h) |
+| `/keepalive <server> [on]` | Exempt from idle shutdown entirely |
 | `/install <server>` | Download/update the server via SteamCMD |
 
 Server names autocomplete. Set `DISCORD_ALLOWED_ROLE` to restrict start/stop/install
 to one role — `/extend` stays open so players can keep their own session alive.
 
-## The 12-hour rule
+## The 12-hour idle rule
 
-- Starting a server sets `auto_stop_at` to 12 hours out.
-- A reaper runs every 60s. `GAMESERVER_WARN_BEFORE_MIN` (default 15) minutes before
-  the deadline it posts a warning naming the extend command; at the deadline it stops
-  the server and says so.
-- `/extend 3` means *three hours from now*, not three hours added to whatever was
-  left — so it behaves the way people expect when a session is nearly up.
-- Stops are graceful: SIGTERM to the process group, then SIGKILL after
-  `GAMESERVER_STOP_GRACE` seconds, so worlds get a chance to save.
-- Every start/stop/extend is written to `gameserver_events` with who ran it.
+The clock measures **idle time, not uptime**. A server with people on it is never
+shut down, however long it has been running.
 
-Change the window with `GAMESERVER_AUTO_STOP_HOURS`; the whole system reads that
-one value.
+- Every 60s the backend asks each running server how many players are on it, using
+  the Steam A2S query protocol — the same mechanism the server browser uses.
+- Someone online → the idle clock resets. Last player leaves → it starts.
+- 12 hours empty → the world is saved and the server stops.
+- 15 minutes before that (`GAMESERVER_WARN_BEFORE_MIN`) a warning is posted. Simply
+  joining the server cancels the shutdown; no command needed.
+- `/extend 3` keeps an empty server up for three more hours, measured from now.
+- `/keepalive` exempts a server from the rule entirely.
+
+A server that can't be queried (Palworld and Satisfactory use REST, not A2S) falls
+back to uptime, so it still shuts down eventually rather than running forever. An
+unknown player count is never treated as "empty".
+
+Change the window with `GAMESERVER_IDLE_STOP_HOURS`.
+
+## Saving before shutdown
+
+Every stop — manual, requested, or the idle reaper — saves first:
+
+1. Where the game speaks Source RCON (ARK, 7 Days to Die, Palworld), an explicit
+   save command is sent and acknowledged.
+2. Then SIGTERM to the process group, with a longer grace period
+   (`GAMESERVER_SAVE_STOP_GRACE`, default 120s) so a large world can finish
+   flushing. Killing mid-write is how saves get corrupted.
+3. SIGKILL only if it overstays.
+
+Rust uses WebSocket RCON and Space Engineers has no standard console, so those rely
+on the engine's own save-on-exit via SIGTERM.
+
+## Stopping servers without griefing each other
+
+Stopping is gated on **occupancy, not on roles** — so swapping ARK out for Space
+Engineers stays a one-command action, while nobody can kill a session someone is
+in the middle of.
+
+| Situation | What happens |
+|---|---|
+| Server is empty | `/stop` works instantly for anyone |
+| Someone is playing | `/stop` refuses and names how many are on |
+| You still want it stopped | `/requeststop` gives them 5 minutes' notice in the channel |
+| They want to keep going | anyone runs `/keepplaying` and the request is cancelled |
+| It's genuinely needed now | an admin uses `force:True` — posted publicly, logged as `force_stop` with their name |
+
+Every action lands in `gameserver_events` with the Discord user who ran it, so if
+someone does start abusing force, there's a record rather than an argument.
 
 ## If the backend restarts
 
