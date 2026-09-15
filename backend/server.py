@@ -20,6 +20,11 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
 
+import gameservers as gs
+import gameserver_service as gsvc
+import discord_bot
+from steam import scanner as steam_scanner
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
@@ -117,6 +122,31 @@ class RegisterPushBody(BaseModel):
     platform: str
     device_token: str
     user_id: Optional[str] = None  # ignored; kept for backward-compat, derived from token
+
+
+class SteamScanBody(BaseModel):
+    api_key: str
+    steamid: str
+    deep: bool = False
+
+
+class GameServerBody(BaseModel):
+    name: str
+    game_appid: int
+    game_name: str
+    server_appid: Optional[int] = None
+    port: Optional[int] = None
+    max_players: Optional[int] = None
+    launch_cmd: Optional[str] = None
+    server_password: Optional[str] = None
+
+
+class ExtendBody(BaseModel):
+    hours: float = 6.0
+
+
+class KeepaliveBody(BaseModel):
+    on: bool = True
 
 
 # =========================== Auth helpers ===================================
@@ -810,6 +840,161 @@ async def register_push(body: RegisterPushBody, user: dict = Depends(get_current
     return {"status": "registered"}
 
 
+# =========================== Steam library ==================================
+@api.post("/steam/scan")
+async def steam_scan(body: SteamScanBody, user: dict = Depends(get_current_user)):
+    """Scan a Steam library for games that can run a dedicated server."""
+    try:
+        catalog = steam_scanner.load_catalog()
+        steamid = await asyncio.to_thread(steam_scanner.resolve_steamid, body.api_key, body.steamid)
+        games = await asyncio.to_thread(steam_scanner.owned_games, body.api_key, steamid)
+        report = await asyncio.to_thread(steam_scanner.scan, games, catalog, body.deep)
+    except SystemExit as e:
+        raise HTTPException(400, str(e))
+    except Exception:
+        raise HTTPException(502, "Could not reach Steam. Check the API key and try again.")
+
+    await db.steam_scans.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"user_id": user["user_id"], "steamid": steamid,
+                  "scanned_at": now_utc().isoformat(),
+                  "total_games": report["total_games"],
+                  "dedicated_capable": report["dedicated_capable"]}},
+        upsert=True)
+    return report
+
+
+@api.get("/steam/scan")
+async def steam_scan_cached(user: dict = Depends(get_current_user)):
+    doc = await db.steam_scans.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "No scan yet")
+    return doc
+
+
+# =========================== Game servers ===================================
+@api.get("/gameservers")
+async def list_gameservers(user: dict = Depends(get_current_user)):
+    rows = [await gsvc.reconcile(r) for r in await gsvc.list_for_user(user["user_id"])]
+    return [gsvc.public(r) for r in rows]
+
+
+@api.post("/gameservers", status_code=201)
+async def add_gameserver(body: GameServerBody, user: dict = Depends(get_current_user)):
+    rec = await gsvc.create(
+        user["user_id"], body.game_appid, body.game_name, body.server_appid,
+        body.name, body.port, body.max_players, body.launch_cmd, body.server_password)
+    return gsvc.public(rec)
+
+
+async def _own_gameserver(server_id: str, user: dict) -> dict:
+    rec = await db.gameservers.find_one(
+        {"id": server_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "Game server not found")
+    return rec
+
+
+@api.post("/gameservers/{server_id}/start")
+async def start_gameserver(server_id: str, user: dict = Depends(get_current_user)):
+    ok, msg = await gsvc.start(await _own_gameserver(server_id, user), actor="app")
+    if not ok:
+        raise HTTPException(409, msg)
+    return {"status": "starting", "message": msg}
+
+
+@api.post("/gameservers/{server_id}/stop")
+async def stop_gameserver(server_id: str, user: dict = Depends(get_current_user)):
+    ok, msg = await gsvc.stop(await _own_gameserver(server_id, user), actor="app")
+    if not ok:
+        raise HTTPException(409, msg)
+    return {"status": "stopped", "message": msg}
+
+
+@api.post("/gameservers/{server_id}/extend")
+async def extend_gameserver(server_id: str, body: ExtendBody,
+                            user: dict = Depends(get_current_user)):
+    ok, msg = await gsvc.extend(await _own_gameserver(server_id, user), body.hours, actor="app")
+    if not ok:
+        raise HTTPException(409, msg)
+    return {"message": msg}
+
+
+@api.post("/gameservers/{server_id}/keepalive")
+async def keepalive_gameserver(server_id: str, body: KeepaliveBody,
+                               user: dict = Depends(get_current_user)):
+    ok, msg = await gsvc.set_keepalive(await _own_gameserver(server_id, user), body.on, actor="app")
+    return {"message": msg}
+
+
+@api.post("/gameservers/{server_id}/install")
+async def install_gameserver(server_id: str, user: dict = Depends(get_current_user)):
+    ok, msg = await gsvc.install(await _own_gameserver(server_id, user), actor="app")
+    if not ok:
+        raise HTTPException(502, msg)
+    return {"message": msg}
+
+
+@api.delete("/gameservers/{server_id}")
+async def delete_gameserver(server_id: str, user: dict = Depends(get_current_user)):
+    rec = await _own_gameserver(server_id, user)
+    if rec.get("status") == "running":
+        await gsvc.stop(rec, actor="app", reason="server deleted")
+    await db.gameservers.delete_one({"id": server_id, "user_id": user["user_id"]})
+    return {"status": "deleted"}
+
+
+@api.get("/gameservers/disk")
+async def gameserver_disk(user: dict = Depends(get_current_user)):
+    """Disks and free space on the host that runs the game servers."""
+    return await gs.disk_report()
+
+
+# =========================== Auto-stop reaper ===============================
+PLAYER_POLL_SECONDS = int(os.environ.get("GAMESERVER_PLAYER_POLL_SECONDS", "3600"))
+
+
+async def reaper_loop():
+    """Two cadences on purpose.
+
+    Player counts are polled over the network on the slow cadence (hourly by
+    default) - that is all the idle clock needs. The countdown itself is just
+    arithmetic on `empty_since`, so it ticks every minute and the shutdown
+    lands on time instead of up to an hour late. Stop decisions re-query live,
+    inside gameserver_service.stop().
+    """
+    await asyncio.sleep(15)
+    last_player_poll = 0.0
+    while True:
+        try:
+            now = time.monotonic()
+            if now - last_player_poll >= PLAYER_POLL_SECONDS:
+                await gsvc.poll_all_occupancy()
+                last_player_poll = now
+
+            for rec in await gsvc.due_stop_requests():
+                ok, msg = await gsvc.stop(rec, actor="stop-request",
+                                          reason="requested stop, nobody objected",
+                                          force=True)
+                if ok:
+                    await discord_bot.announce(
+                        f"🛑 **{rec['name']}** stopped — nobody cancelled the request.")
+
+            for rec in await gsvc.due_for_warning():
+                rem = gs.fmt_remaining(gs.remaining_seconds(rec))
+                await gsvc.mark_warned(rec)
+                await discord_bot.announce(
+                    f"⏳ **{rec['name']}** has been empty a while and stops in {rem}. "
+                    f"Join it or use `/extend {rec['name']}` to keep it up.")
+            for rec, _msg in await gsvc.reap():
+                await discord_bot.announce(
+                    f"🛑 **{rec['name']}** sat empty for {gs.AUTO_STOP_HOURS}h — "
+                    f"world saved and shut down. `/start {rec['name']}` brings it back.")
+        except Exception as e:
+            logger.warning(f"reaper error: {e}")
+        await asyncio.sleep(60)
+
+
 # =========================== Background poller ===============================
 async def poller_loop():
     await asyncio.sleep(20)
@@ -867,7 +1052,15 @@ async def startup():
     await db.alerts.create_index("user_id")
     await db.metrics.create_index("server_id")
     await db.metrics.create_index("ts", expireAfterSeconds=7 * 24 * 3600)
+    await db.gameservers.create_index("user_id")
+    await db.gameserver_events.create_index("server_id")
+    await db.steam_scans.create_index("user_id", unique=True)
+    gsvc.init(db)
     asyncio.create_task(poller_loop())
+    asyncio.create_task(reaper_loop())
+    if discord_bot.enabled():
+        asyncio.create_task(discord_bot.run(db))
+        logger.info("Discord bot enabled")
     logger.info("WebminPulse backend started")
 
 
