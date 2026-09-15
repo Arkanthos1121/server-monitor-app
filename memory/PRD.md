@@ -181,9 +181,6 @@ updates and notify. (User asked to pause and check in at ~50 credits.)
   server; profiles can override with query_port.
 - RCON save needs a password on the record (rcon_password/server_password); without one it falls
   back to SIGTERM save-on-exit.
-- /keepplaying can be run by anyone in the channel, not only by people actually on the server —
-  Discord identity is not linked to in-game identity. Acceptable for a friend group; would need
-  per-game player-name lookup (A2S_PLAYER) to tighten.
 - Proton/Wine paths are unverified against a real install (no x86_64 host in this session).
 
 ## Idle Cadence + Stop Ownership (2026-09-15, session 8)
@@ -211,7 +208,13 @@ updates and notify. (User asked to pause and check in at ~50 credits.)
 - 124 tests passing across 8 files.
 
 ### Known Limitations
-- /keepplaying is still open to anyone in the channel (Discord identity is not linked to
-  in-game identity). Tightening needs A2S_PLAYER name matching.
 - An hourly sweep means an idle server can sit up to ~13h before stopping if it empties just
   after a poll. Acceptable; lower GAMESERVER_PLAYER_POLL_SECONDS to tighten.
+
+## Decisions (deliberate - do not "fix")
+- **/keepplaying is open to anyone in the channel** (2026-09-15, user decision). It is NOT
+  restricted to players verified as being on the server, and this is intentional, not an
+  oversight. Tightening it would mean matching Discord identities to in-game names via
+  A2S_PLAYER, which is per-game, fragile, and pointless for a friend group. The veto is a
+  low-stakes action: its worst case is a server staying up slightly longer, which the idle
+  reaper cleans up anyway. Leave it open.

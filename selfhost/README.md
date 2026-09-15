@@ -170,7 +170,7 @@ Leaving `DISCORD_BOT_TOKEN` blank disables the bot; everything else still runs.
 | `/stop <server>` | Stop it — **refuses if anyone is playing** |
 | `/stop <server> force:True` | Admin override; announced publicly and audited |
 | `/requeststop <server>` | Ask players to wrap up; stops after 5 min unless cancelled |
-| `/keepplaying <server>` | Cancel a pending stop — anyone on the server can use this |
+| `/keepplaying <server>` | Cancel a pending stop — open to anyone in the channel |
 | `/extend <server> [hours]` | Keep an empty server up anyway (default 6h, max 24h) |
 | `/keepalive <server> [on]` | Exempt from idle shutdown entirely |
 | `/install <server>` | Download/update the server via SteamCMD |
@@ -240,7 +240,9 @@ having Manage Server in Discord, so force-stop works out of the box.
 When you can't stop it yourself:
 
 - `/requeststop <server>` gives the people on it 5 minutes' notice in the channel.
-- Anyone can `/keepplaying <server>` to cancel it.
+- Anyone in the channel can `/keepplaying <server>` to cancel it. This is deliberately
+  unrestricted: the worst a bad-faith veto achieves is keeping a server up a while
+  longer, and the idle reaper stops it anyway.
 - If nobody objects, automation stops it and says so.
 
 An admin force-stop is never quiet: it posts "⚠️ X force-stopped **server** with N
