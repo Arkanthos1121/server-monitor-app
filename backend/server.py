@@ -951,14 +951,26 @@ async def gameserver_disk(user: dict = Depends(get_current_user)):
 
 
 # =========================== Auto-stop reaper ===============================
+PLAYER_POLL_SECONDS = int(os.environ.get("GAMESERVER_PLAYER_POLL_SECONDS", "3600"))
+
+
 async def reaper_loop():
-    """Enforce the auto-stop deadline and warn in Discord shortly beforehand."""
+    """Two cadences on purpose.
+
+    Player counts are polled over the network on the slow cadence (hourly by
+    default) - that is all the idle clock needs. The countdown itself is just
+    arithmetic on `empty_since`, so it ticks every minute and the shutdown
+    lands on time instead of up to an hour late. Stop decisions re-query live,
+    inside gameserver_service.stop().
+    """
     await asyncio.sleep(15)
+    last_player_poll = 0.0
     while True:
         try:
-            # Ask every running server how many people are on it. This drives
-            # both the idle shutdown and the "don't stop an occupied server" guard.
-            await gsvc.poll_all_occupancy()
+            now = time.monotonic()
+            if now - last_player_poll >= PLAYER_POLL_SECONDS:
+                await gsvc.poll_all_occupancy()
+                last_player_poll = now
 
             for rec in await gsvc.due_stop_requests():
                 ok, msg = await gsvc.stop(rec, actor="stop-request",

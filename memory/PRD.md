@@ -185,3 +185,33 @@ updates and notify. (User asked to pause and check in at ~50 credits.)
   Discord identity is not linked to in-game identity. Acceptable for a friend group; would need
   per-game player-name lookup (A2S_PLAYER) to tighten.
 - Proton/Wine paths are unverified against a real install (no x86_64 host in this session).
+
+## Idle Cadence + Stop Ownership (2026-09-15, session 8)
+- User refinement 1: poll hourly, not every 60s. Split into TWO cadences rather than
+  slowing everything: network player-polls hourly (GAMESERVER_PLAYER_POLL_SECONDS=3600)
+  since that's all the idle clock needs; countdown arithmetic still ticks every 60s so the
+  shutdown lands on time; and stop() re-queries LIVE before any permission decision.
+  Rationale: the hourly sweep also fed the /stop occupancy guard, so an hour-stale count would
+  have let someone stop a server a player had just joined. Covered by
+  test_stop_refreshes_the_player_count_before_deciding.
+- User refinement 2: ownership-based stop rules, in new `backend/stop_policy.py` (pure
+  functions, no DB, 17 tests). Matrix:
+    empty   + starter            -> allowed
+    empty   + anyone else        -> refused (names the starter)
+    empty   + admin              -> allowed
+    occupied+ ANYONE incl starter-> refused; admin only
+    occupied+ admin              -> allowed but must pass force:True (no accidental session kills)
+    automation                   -> always allowed
+  Key call: the STARTER cannot stop their own server while others play. "I started it so I can
+  end your session" is the exact griefing being prevented.
+- `started_by` recorded on start; servers with no recorded owner stay stoppable (back-compat).
+- GAMESERVER_EMPTY_STOP_POLICY=starter|anyone relaxes only the empty-server rule.
+- Discord admin = DISCORD_ADMIN_ROLE, falling back to Discord's Manage Server permission so
+  force-stop works before any role is configured.
+- 124 tests passing across 8 files.
+
+### Known Limitations
+- /keepplaying is still open to anyone in the channel (Discord identity is not linked to
+  in-game identity). Tightening needs A2S_PLAYER name matching.
+- An hourly sweep means an idle server can sit up to ~13h before stopping if it empties just
+  after a poll. Acceptable; lower GAMESERVER_PLAYER_POLL_SECONDS to tighten.

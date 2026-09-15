@@ -183,12 +183,19 @@ to one role — `/extend` stays open so players can keep their own session alive
 The clock measures **idle time, not uptime**. A server with people on it is never
 shut down, however long it has been running.
 
-- Every 60s the backend asks each running server how many players are on it, using
-  the Steam A2S query protocol — the same mechanism the server browser uses.
+- **Hourly** (`GAMESERVER_PLAYER_POLL_SECONDS`) the backend asks each running server
+  how many players are on it, over the Steam A2S protocol — the same mechanism the
+  server browser uses.
 - Someone online → the idle clock resets. Last player leaves → it starts.
 - 12 hours empty → the world is saved and the server stops.
 - 15 minutes before that (`GAMESERVER_WARN_BEFORE_MIN`) a warning is posted. Simply
   joining the server cancels the shutdown; no command needed.
+
+Two cadences, deliberately. Network polls are hourly, because that is all the idle
+clock needs. The countdown itself is arithmetic on a timestamp, so it ticks every
+minute and the shutdown lands on time rather than up to an hour late. And any stop
+decision re-queries the server live — deciding whether someone is mid-session on an
+hour-old player count is how you end up killing an occupied server.
 - `/extend 3` keeps an empty server up for three more hours, measured from now.
 - `/keepalive` exempts a server from the rule entirely.
 
@@ -214,20 +221,35 @@ on the engine's own save-on-exit via SIGTERM.
 
 ## Stopping servers without griefing each other
 
-Stopping is gated on **occupancy, not on roles** — so swapping ARK out for Space
-Engineers stays a one-command action, while nobody can kill a session someone is
-in the middle of.
+Who may stop a server depends on whether anyone is on it and who started it:
 
-| Situation | What happens |
-|---|---|
-| Server is empty | `/stop` works instantly for anyone |
-| Someone is playing | `/stop` refuses and names how many are on |
-| You still want it stopped | `/requeststop` gives them 5 minutes' notice in the channel |
-| They want to keep going | anyone runs `/keepplaying` and the request is cancelled |
-| It's genuinely needed now | an admin uses `force:True` — posted publicly, logged as `force_stop` with their name |
+| Who | Empty server | People playing |
+|---|---|---|
+| The person who ran `/start` | ✅ | ❌ — needs an admin |
+| Anyone else | ❌ | ❌ |
+| Admin | ✅ | ✅ with `force:True` |
+| Automation (idle reaper, un-vetoed request) | ✅ | n/a — never stops an occupied server |
 
-Every action lands in `gameserver_events` with the Discord user who ran it, so if
-someone does start abusing force, there's a record rather than an argument.
+Starting a server does **not** grant power over other people's sessions: the
+starter cannot stop their own server while others are playing on it. That's the
+case this is really guarding against.
+
+**Admin** means holding `DISCORD_ADMIN_ROLE`, or — if no role is configured —
+having Manage Server in Discord, so force-stop works out of the box.
+
+When you can't stop it yourself:
+
+- `/requeststop <server>` gives the people on it 5 minutes' notice in the channel.
+- Anyone can `/keepplaying <server>` to cancel it.
+- If nobody objects, automation stops it and says so.
+
+An admin force-stop is never quiet: it posts "⚠️ X force-stopped **server** with N
+online" in the channel and writes a `force_stop` row naming them. Every action lands
+in `gameserver_events` with the Discord user who ran it, so abuse leaves a record
+rather than an argument.
+
+Set `GAMESERVER_EMPTY_STOP_POLICY=anyone` if you'd rather let anybody free up RAM on
+an idle server. It does not weaken the occupied-server rule.
 
 ## If the backend restarts
 

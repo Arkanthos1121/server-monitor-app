@@ -8,12 +8,12 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from datetime import timedelta
 from typing import Optional
 
 import a2s
-from datetime import timedelta
-
 import gameservers as gs
+import stop_policy
 from steam import profiles
 
 logger = logging.getLogger("webminpulse.gameservers")
@@ -33,6 +33,7 @@ def public(rec: dict) -> dict:
     rem = gs.remaining_seconds(rec) if rec.get("status") == "running" else None
     return {
         "id": rec["id"], "name": rec["name"], "game_name": rec.get("game_name"),
+        "started_by": rec.get("started_by"),
         "game_appid": rec.get("game_appid"), "server_appid": rec.get("server_appid"),
         "status": rec.get("status", "stopped"), "port": rec.get("port"),
         "max_players": rec.get("max_players"), "installed": bool(rec.get("installed")),
@@ -111,7 +112,7 @@ async def start(rec: dict, actor: str = "api") -> tuple[bool, str]:
         "started_at": started.isoformat(), "auto_stop_at": deadline.isoformat(),
         "warned_at": None, "last_message": msg,
         "players_online": 0, "players_known": False, "pending_stop": None,
-        "idle_grace_until": None,
+        "idle_grace_until": None, "started_by": actor,
         # A freshly started server is empty; the idle clock starts now.
         "empty_since": started.isoformat()}})
     await _audit(rec, "start", actor, f"pid={pid}")
@@ -121,22 +122,29 @@ async def start(rec: dict, actor: str = "api") -> tuple[bool, str]:
 
 
 async def stop(rec: dict, actor: str = "api", reason: str = "",
-               force: bool = False) -> tuple[bool, str]:
+               force: bool = False, is_admin: bool = False) -> tuple[bool, str]:
     """Stop a server, saving its world first.
 
-    Refuses while people are playing unless forced - that guard is the whole
-    anti-griefing mechanism, so it lives here rather than in one UI.
+    Permission lives in stop_policy so every surface enforces the same rules.
+    The player count is refreshed here rather than trusted from the last hourly
+    sweep: deciding whether someone is mid-session on an hour-old number is how
+    you end up killing an occupied server.
     """
     rec = await reconcile(rec)
     if rec.get("status") != "running":
         return False, f"**{rec['name']}** is not running."
 
+    if not stop_policy.is_automation(actor):
+        rec = await poll_occupancy(rec)
+
+    decision = stop_policy.may_stop(rec, actor, is_admin=is_admin)
+    if not decision.allowed:
+        return False, decision.reason
     online = rec.get("players_online") or 0
-    if online > 0 and not force:
-        who = "1 person is" if online == 1 else f"{online} people are"
-        return False, (f"{who} playing on **{rec['name']}** right now.\n"
-                       f"Use `/requeststop {rec['name']}` to ask them to wrap up, "
-                       f"or an admin can `/stop {rec['name']} force:True`.")
+    if decision.needs_force and not force:
+        return False, (f"{online} playing on **{rec['name']}**. "
+                       f"Re-run with `force:True` to stop it anyway — "
+                       f"it will be posted in the channel.")
 
     await _db.gameservers.update_one({"id": rec["id"]}, {"$set": {"status": "stopping"}})
     how = await gs.save_then_stop(rec)
@@ -145,8 +153,7 @@ async def stop(rec: dict, actor: str = "api", reason: str = "",
         "players_online": 0, "empty_since": None, "pending_stop": None,
         "idle_grace_until": None,
         "last_message": f"{how}{(' (' + reason + ')') if reason else ''}"}})
-    await _audit(rec, "force_stop" if (force and online) else "stop", actor,
-                 reason or how)
+    await _audit(rec, "force_stop" if online else "stop", actor, reason or how)
     note = f" (forced past {online} online)" if (force and online) else ""
     return True, f"**{rec['name']}** stopped{note} — world saved. ({how})"
 
@@ -265,7 +272,8 @@ async def poll_all_occupancy() -> list[dict]:
 
 
 # -------------------------------------------------- stop requests / veto ---
-async def request_stop(rec: dict, actor: str, seconds: int = None) -> tuple[bool, str]:
+async def request_stop(rec: dict, actor: str, seconds: int = None,
+                       is_admin: bool = False) -> tuple[bool, str]:
     """Ask to stop an occupied server, giving the people on it a chance to object.
 
     This is the middle path between "anyone can kill your session" and "only
@@ -277,7 +285,8 @@ async def request_stop(rec: dict, actor: str, seconds: int = None) -> tuple[bool
         return False, f"**{rec['name']}** is not running."
     seconds = seconds or STOP_REQUEST_SECONDS
     if not rec.get("players_online"):
-        ok, msg = await stop(rec, actor=actor, reason="empty at request time")
+        ok, msg = await stop(rec, actor=actor, reason="empty at request time",
+                             is_admin=is_admin)
         return ok, msg
     if rec.get("pending_stop"):
         return False, f"A stop request for **{rec['name']}** is already running."

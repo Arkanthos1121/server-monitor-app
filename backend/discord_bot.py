@@ -26,7 +26,10 @@ TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
 GUILD_ID = os.environ.get("DISCORD_GUILD_ID", "").strip()
 OWNER_EMAIL = os.environ.get("DISCORD_OWNER_EMAIL", "").strip().lower()
 CHANNEL_ID = os.environ.get("DISCORD_CHANNEL_ID", "").strip()
-ALLOWED_ROLE = os.environ.get("DISCORD_ALLOWED_ROLE", "").strip()
+# Role allowed to stop a server people are playing on, and to install/force.
+ADMIN_ROLE = (os.environ.get("DISCORD_ADMIN_ROLE")
+              or os.environ.get("DISCORD_ALLOWED_ROLE", "")).strip()
+ALLOWED_ROLE = ADMIN_ROLE  # back-compat name used in older messages
 
 _bot = None
 _db = None
@@ -54,11 +57,28 @@ async def _owner_user_id() -> Optional[str]:
     return _owner_id
 
 
-def _permitted(interaction) -> bool:
-    if not ALLOWED_ROLE:
+def _is_admin(interaction) -> bool:
+    """Admin = the configured role, or anyone who can manage the Discord server.
+
+    Falling back to Discord's own permissions means force-stop still works when
+    no role has been configured, instead of nobody being able to use it.
+    """
+    user = getattr(interaction, "user", None)
+    roles = getattr(user, "roles", []) or []
+    if ADMIN_ROLE and any(getattr(r, "name", "") == ADMIN_ROLE for r in roles):
         return True
-    roles = getattr(getattr(interaction, "user", None), "roles", []) or []
-    return any(getattr(r, "name", "") == ALLOWED_ROLE for r in roles)
+    perms = getattr(user, "guild_permissions", None)
+    return bool(getattr(perms, "manage_guild", False)
+                or getattr(perms, "administrator", False))
+
+
+def _permitted(interaction) -> bool:
+    """Kept for install/keepalive, which stay admin-gated."""
+    return _is_admin(interaction)
+
+
+def _actor(interaction) -> str:
+    return f"discord:{interaction.user}"
 
 
 async def _resolve(interaction, name: str):
@@ -116,10 +136,12 @@ def build(db):
             bits = [f"{icon} **{r['name']}** — {r.get('game_name') or 'unknown game'}"]
             if r.get("status") == "running":
                 rem = gs.fmt_remaining(gs.remaining_seconds(r))
+                owner = (r.get("started_by") or "").replace("discord:", "")
+                by = f" · started by {owner}" if owner else ""
                 if r.get("players_online"):
-                    bits.append(f"port {r.get('port')} · {r['players_online']} playing")
+                    bits.append(f"port {r.get('port')} · {r['players_online']} playing{by}")
                 else:
-                    bits.append(f"port {r.get('port')} · empty, stops in {rem}")
+                    bits.append(f"port {r.get('port')} · empty, stops in {rem}{by}")
             elif not r.get("installed"):
                 bits.append("not installed")
             lines.append("\n".join(["  ".join(bits[:1]), f"   ↳ {bits[1]}" if len(bits) > 1 else ""]).rstrip())
@@ -151,13 +173,9 @@ def build(db):
         if err:
             await interaction.followup.send(err)
             return
-        if force and not _permitted(interaction):
-            await interaction.followup.send(
-                f"Only **{ALLOWED_ROLE}** can force a stop past players. "
-                f"Try `/requeststop {rec['name']}` instead.")
-            return
-        actor = f"discord:{interaction.user}"
-        ok, msg = await svc.stop(rec, actor=actor, reason="stopped from Discord", force=force)
+        actor = _actor(interaction)
+        ok, msg = await svc.stop(rec, actor=actor, reason="stopped from Discord",
+                                 force=force, is_admin=_is_admin(interaction))
         await interaction.followup.send(msg)
         if ok and force and rec.get("players_online"):
             # Forcing people offline is public, so it can't be done quietly.
@@ -173,7 +191,8 @@ def build(db):
         if err:
             await interaction.followup.send(err)
             return
-        ok, msg = await svc.request_stop(rec, actor=f"discord:{interaction.user}")
+        ok, msg = await svc.request_stop(rec, actor=_actor(interaction),
+                                         is_admin=_is_admin(interaction))
         await interaction.followup.send(msg)
 
     @tree.command(name="keepplaying", description="Cancel a pending stop - you're still playing")

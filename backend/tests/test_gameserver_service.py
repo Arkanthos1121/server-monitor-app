@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import a2s  # noqa: E402
 import gameservers as gs  # noqa: E402
 import gameserver_service as svc  # noqa: E402
 
@@ -69,6 +70,8 @@ def db(monkeypatch):
     monkeypatch.setattr(gs, "spawn", _fake_spawn)
     monkeypatch.setattr(gs, "terminate", _fake_terminate)
     monkeypatch.setattr(gs, "save_then_stop", _fake_save_then_stop)
+    # The live re-query in stop() must not touch a real socket; echo the row.
+    monkeypatch.setattr(svc, "poll_occupancy", _echo_occupancy)
     monkeypatch.setattr(gs, "alive", _fake_alive)
     monkeypatch.setattr(gs, "is_alive", lambda pid, ticks=None: pid == 4242)
     return d
@@ -82,6 +85,10 @@ async def _fake_terminate(pid, grace=30):
     return "stopped cleanly"
 
 
+async def _echo_occupancy(rec):
+    return rec
+
+
 async def _fake_save_then_stop(rec, grace=None):
     saved.append(rec["id"])
     return "stopped cleanly (world saved)"
@@ -93,6 +100,10 @@ saved: list = []
 async def _fake_alive(rec):
     """Only the PID our fake spawn hands out is considered a live process."""
     return rec.get("pid") == 4242
+
+
+JEFF = "discord:Jeff"
+ADMIN = "discord:Admin"
 
 
 async def make(db, **kw):
@@ -246,7 +257,8 @@ async def test_dead_process_is_reconciled_to_stopped(db):
 async def test_stop_records_an_audit_trail(db):
     rec = await make(db)
     await svc.start(rec, actor="discord:alice")
-    await svc.stop(await reload(db, rec), actor="discord:bob", reason="stopped from Discord")
+    await svc.stop(await reload(db, rec), actor="discord:bob",
+                   reason="stopped from Discord", is_admin=True)
     events = await db.gameserver_events.find({"server_id": rec["id"]}).to_list(50)
     actions = {e["action"]: e["actor"] for e in events}
     assert actions["start"] == "discord:alice"
@@ -288,8 +300,8 @@ async def test_singular_wording_for_one_player(db):
 async def test_empty_server_stops_with_no_friction(db):
     """Swapping ASA out for Space Engineers must stay a one-command action."""
     rec = await make(db)
-    await svc.start(rec)
-    ok, msg = await svc.stop(await reload(db, rec), actor="discord:jeff")
+    await svc.start(rec, actor=JEFF)
+    ok, msg = await svc.stop(await reload(db, rec), actor=JEFF)
     assert ok and "world saved" in msg.lower()
     assert (await reload(db, rec))["status"] == "stopped"
 
@@ -299,7 +311,8 @@ async def test_admin_can_force_past_players(db):
     rec = await make(db)
     await svc.start(rec)
     await occupy(db, rec, players=3)
-    ok, msg = await svc.stop(await reload(db, rec), actor="discord:admin", force=True)
+    ok, msg = await svc.stop(await reload(db, rec), actor=ADMIN,
+                             force=True, is_admin=True)
     assert ok and "forced past 3 online" in msg
     assert (await reload(db, rec))["status"] == "stopped"
 
@@ -310,10 +323,10 @@ async def test_forcing_is_recorded_separately_in_the_audit_log(db):
     rec = await make(db)
     await svc.start(rec)
     await occupy(db, rec, players=3)
-    await svc.stop(await reload(db, rec), actor="discord:admin", force=True)
+    await svc.stop(await reload(db, rec), actor=ADMIN, force=True, is_admin=True)
     events = await db.gameserver_events.find({"server_id": rec["id"]}).to_list(50)
     forced = [e for e in events if e["action"] == "force_stop"]
-    assert len(forced) == 1 and forced[0]["actor"] == "discord:admin"
+    assert len(forced) == 1 and forced[0]["actor"] == ADMIN
 
 
 @pytest.mark.asyncio
@@ -343,8 +356,8 @@ async def test_a_player_can_veto_the_stop_request(db):
 @pytest.mark.asyncio
 async def test_request_on_an_empty_server_stops_it_immediately(db):
     rec = await make(db)
-    await svc.start(rec)
-    ok, msg = await svc.request_stop(await reload(db, rec), actor="discord:jeff")
+    await svc.start(rec, actor=JEFF)
+    ok, msg = await svc.request_stop(await reload(db, rec), actor=JEFF)
     assert ok
     assert (await reload(db, rec))["status"] == "stopped"
 
@@ -379,8 +392,8 @@ async def test_duplicate_stop_requests_are_refused(db):
 async def test_world_is_saved_before_every_stop(db):
     saved.clear()
     rec = await make(db)
-    await svc.start(rec)
-    await svc.stop(await reload(db, rec), actor="discord:jeff")
+    await svc.start(rec, actor=JEFF)
+    await svc.stop(await reload(db, rec), actor=JEFF)
     assert saved == [rec["id"]]
 
 
@@ -393,3 +406,73 @@ async def test_auto_stop_also_saves_the_world(db):
     await idle_for(db, rec, hours=12, minutes=1)
     await svc.reap()
     assert saved == [rec["id"]]
+
+
+# ------------------------------------------ ownership of a running server --
+@pytest.mark.asyncio
+async def test_starter_can_stop_their_own_empty_server(db):
+    rec = await make(db)
+    await svc.start(rec, actor=JEFF)
+    assert (await reload(db, rec))["started_by"] == JEFF
+    ok, _msg = await svc.stop(await reload(db, rec), actor=JEFF)
+    assert ok
+
+
+@pytest.mark.asyncio
+async def test_bystander_cannot_stop_someone_elses_empty_server(db):
+    rec = await make(db)
+    await svc.start(rec, actor=JEFF)
+    ok, msg = await svc.stop(await reload(db, rec), actor="discord:Dave")
+    assert not ok and "started by Jeff" in msg
+    assert (await reload(db, rec))["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_starter_cannot_stop_their_server_while_others_play(db):
+    """Owning the server does not mean owning other people's sessions."""
+    rec = await make(db)
+    await svc.start(rec, actor=JEFF)
+    await occupy(db, rec, players=2)
+    ok, msg = await svc.stop(await reload(db, rec), actor=JEFF)
+    assert not ok and "Only an admin" in msg
+
+
+@pytest.mark.asyncio
+async def test_admin_still_needs_force_to_end_live_sessions(db):
+    """Being admin shouldn't let you kill a session by accident."""
+    rec = await make(db)
+    await svc.start(rec, actor=JEFF)
+    await occupy(db, rec, players=2)
+    ok, msg = await svc.stop(await reload(db, rec), actor=ADMIN, is_admin=True)
+    assert not ok and "force:True" in msg
+    ok, _ = await svc.stop(await reload(db, rec), actor=ADMIN, is_admin=True, force=True)
+    assert ok
+
+
+@pytest.mark.asyncio
+async def test_stop_refreshes_the_player_count_before_deciding(db, monkeypatch):
+    """An hour-stale count must not be what a stop decision rests on.
+
+    The stored row says empty; a live query says two people just joined.
+    The stop has to see the live answer.
+    """
+    rec = await make(db)
+    await svc.start(rec, actor=JEFF)
+
+    async def someone_just_joined(r):
+        patch = gs.occupancy_patch(r, 2)
+        await db.gameservers.update_one({"id": r["id"]}, {"$set": patch})
+        return {**r, **patch}
+
+    monkeypatch.setattr(svc, "poll_occupancy", someone_just_joined)
+    ok, msg = await svc.stop(await reload(db, rec), actor=JEFF)
+    assert not ok and "2 people are playing" in msg
+
+
+@pytest.mark.asyncio
+async def test_automation_bypasses_ownership_entirely(db):
+    rec = await make(db)
+    await svc.start(rec, actor=JEFF)
+    await idle_for(db, rec, hours=12, minutes=1)
+    stopped = await svc.reap()
+    assert len(stopped) == 1
