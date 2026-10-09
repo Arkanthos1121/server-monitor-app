@@ -98,3 +98,40 @@ async def test_unreachable_rcon_does_not_raise():
 async def test_execute_raises_on_unreachable_host():
     with pytest.raises(rcon.RconError):
         await rcon.execute("127.0.0.1", 1, PASSWORD, "saveworld", timeout=0.5)
+
+
+# ---- 7 Days to Die telnet console -------------------------------------------
+async def _fake_7dtd(password="pw", save_ok=True):
+    async def handle(reader, writer):
+        writer.write(b"*** Connected with 7DTD server.\r\nPlease enter password:\r\n")
+        await writer.drain()
+        got = (await reader.readline()).strip().decode()
+        if got != password:
+            writer.write(b"Password incorrect, please enter password:\r\n")
+            await writer.drain()
+            writer.close()
+            return
+        writer.write(b"Logon successful.\r\n")
+        await writer.drain()
+        await reader.readline()
+        if save_ok:
+            writer.write(b"2026-09-26T19:00:00 INF World saved\r\n")
+            await writer.drain()
+        await asyncio.sleep(0.5)
+        writer.close()
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    return server, server.sockets[0].getsockname()[1]
+
+
+async def test_telnet_save_waits_for_world_saved():
+    server, port = await _fake_7dtd()
+    async with server:
+        ok, msg = await rcon.save_world("127.0.0.1", port, "pw", "saveworld", proto="telnet")
+    assert ok and "acknowledged" in msg
+
+
+async def test_telnet_save_reports_bad_password():
+    server, port = await _fake_7dtd()
+    async with server:
+        ok, msg = await rcon.save_world("127.0.0.1", port, "nope", "saveworld", proto="telnet")
+    assert not ok

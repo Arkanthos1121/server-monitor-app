@@ -19,7 +19,8 @@ services:
       context: ../backend     # uses your repo's backend/server.py
       dockerfile_inline: |
         FROM python:3.11-slim
-        RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping \
+        # openssh-client: GAMESERVER_SSH_HOST mode shells out to `ssh`.
+        RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping openssh-client \
             && rm -rf /var/lib/apt/lists/*
         WORKDIR /app
         RUN pip install --no-cache-dir fastapi "uvicorn[standard]" motor pymongo \

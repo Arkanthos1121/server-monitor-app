@@ -85,12 +85,16 @@ class _Protocol(asyncio.DatagramProtocol):
 
 
 async def _exchange(host: str, port: int, payload: bytes, timeout: float) -> bytes:
+    # Deliberately NOT a connected socket. A server bound to 0.0.0.0 replies
+    # from whichever address faces us - from a Docker container that is the
+    # bridge IP, not the LAN IP we sent to - and a connected socket silently
+    # drops those replies.
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
     transport, _ = await loop.create_datagram_endpoint(
-        lambda: _Protocol(fut), remote_addr=(host, port))
+        lambda: _Protocol(fut), local_addr=("0.0.0.0", 0))
     try:
-        transport.sendto(payload)
+        transport.sendto(payload, (host, port))
         return await asyncio.wait_for(fut, timeout)
     finally:
         transport.close()

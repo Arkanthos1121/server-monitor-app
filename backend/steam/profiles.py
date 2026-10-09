@@ -12,7 +12,9 @@ PROFILES = {
     896660: {  # Valheim
         "game": "Valheim", "port": 2456, "players": 10,
         "linux": "valheim_server.x86_64", "windows": "valheim_server.exe",
-        "args": "-nographics -batchmode -name {name} -port {port} -world {name} -password {password} -public 0",
+        # -public 0 makes the server ignore A2S queries entirely (verified), which
+        # blinds idle shutdown and the stop guard. It's still password-protected.
+        "args": "-nographics -batchmode -name {name} -port {port} -world {name} -password {password} -public 1",
         "needs_password": True, "min_password": 5,
         "query_port_offset": 1,
     },
@@ -25,14 +27,21 @@ PROFILES = {
     258550: {  # Rust
         "game": "Rust", "port": 28015, "players": 50,
         "linux": "RustDedicated", "windows": "RustDedicated.exe",
-        "args": "-batchmode +server.port {port} +server.hostname \"{name}\" +server.maxplayers {players}",
-        "query_port_offset": 1,
+        # Query port pinned explicitly: Rust's default has moved between releases.
+        "args": ("-batchmode +server.port {port} +server.queryport 28017 "
+                 "+server.hostname \"{name}\" +server.maxplayers {players}"),
+        "query_port": 28017,
     },
     294420: {  # 7 Days to Die
         "game": "7 Days to Die", "port": 26900, "players": 8,
         "linux": "startserver.sh", "windows": "startdedicated.bat",
         "args": "-configfile=serverconfig.xml",
-        "query_port": 26900, "rcon_port": 8081, "save_cmd": "saveworld",
+        # The console is telnet, not Source RCON, and only accepts remote logons
+        # when TelnetPassword is set. Moved off the default 8081, which is a
+        # common web-UI port (qBittorrent via gluetun, on the target box):
+        # set TelnetPort to 8091 in serverconfig.xml to match.
+        "query_port": 26900, "rcon_port": 8091, "save_cmd": "saveworld",
+        "rcon_proto": "telnet",
     },
     380870: {  # Project Zomboid
         "game": "Project Zomboid", "port": 16261, "players": 16,
@@ -40,11 +49,11 @@ PROFILES = {
         "args": "-servername {name}",
         "query_port_offset": 1,
     },
-    1829350: {  # V Rising
+    1829350: {  # V Rising - Windows-only server, no Linux build
         "game": "V Rising", "port": 9876, "players": 10,
-        "linux": "VRisingServer.exe", "windows": "VRisingServer.exe",
+        "linux": None, "windows": "VRisingServer.exe",
         "args": "-persistentDataPath ./save-data -serverName \"{name}\" -gamePort {port}",
-        "query_port_offset": 1,
+        "query_port_offset": 1, "runner": "wine",
     },
     1690800: {  # Satisfactory
         "game": "Satisfactory", "port": 7777, "players": 4,
@@ -56,7 +65,8 @@ PROFILES = {
         "game": "ARK: Survival Evolved", "port": 7777, "players": 20,
         "linux": "ShooterGame/Binaries/Linux/ShooterGameServer",
         "windows": "ShooterGame/Binaries/Win64/ShooterGameServer.exe",
-        "args": "TheIsland?listen?SessionName=\"{name}\"?Port={port}?MaxPlayers={players}",
+        "args": ("TheIsland?listen?SessionName=\"{name}\"?Port={port}?MaxPlayers={players}"
+                 "?RCONEnabled=True?RCONPort=27020?ServerAdminPassword={password}"),
         "query_port": 27015, "rcon_port": 27020, "save_cmd": "saveworld",
     },
     2278520: {  # Enshrouded
@@ -94,6 +104,8 @@ PROFILES = {
         "linux": "srcds_run", "windows": "srcds.exe",
         "args": "-console -game left4dead2 +map c1m1_hotel -port {port}",
         "query_port_offset": 0,
+        # SteamCMD rejects a Linux-only install ("Invalid platform").
+        "platforms": ["windows", "linux"],
     },
     232250: {  # Team Fortress 2
         "game": "Team Fortress 2", "port": 27015, "players": 24,
@@ -116,7 +128,9 @@ PROFILES = {
     1110390: {  # Unturned
         "game": "Unturned", "port": 27015, "players": 24,
         "linux": "ServerHelper.sh", "windows": "Unturned.exe",
-        "args": "+LanServer/{name}",
+        # LanServer hides it from anyone outside the house; InternetServer
+        # lists it publicly. Port lives in Servers/{name}/Server/Commands.dat.
+        "args": "+InternetServer/{name}",
         "query_port_offset": 1,
     },
     1026340: {  # Barotrauma
@@ -125,17 +139,96 @@ PROFILES = {
         "args": "",
         "query_port_offset": 0,
     },
-    2089300: {  # Icarus
+    2089300: {  # Icarus - Windows-only server; SteamCMD calls Linux "Invalid platform"
+        # The IcarusServer.exe bootstrapper hangs under Wine; the shipping
+        # binary runs (verified, answers A2S) once the prefix is set to win10.
         "game": "ICARUS", "port": 17777, "players": 8,
-        "linux": "IcarusServer.sh", "windows": "IcarusServer.exe",
-        "args": "-Port={port}",
-        "query_port_offset": 1,
+        "linux": None, "windows": "Icarus/Binaries/Win64/IcarusServer-Win64-Shipping.exe",
+        "args": "-Log -PORT={port} -QueryPort=27015 -SteamServerName=\"{name}\"",
+        "query_port": 27015, "runner": "wine",
     },
     2430930: {  # ARK: Survival Ascended
         "game": "ARK: Survival Ascended", "port": 7777, "players": 20,
         "linux": None, "windows": "ShooterGame/Binaries/Win64/ArkAscendedServer.exe",
-        "args": "TheIsland_WP?listen?SessionName=\"{name}\"?Port={port}",
+        "args": ("TheIsland_WP?listen?SessionName=\"{name}\"?Port={port}"
+                 "?RCONEnabled=True?RCONPort=27020?ServerAdminPassword={password}"),
         "query_port": 27015, "rcon_port": 27020, "save_cmd": "saveworld", "runner": "proton",
+    },
+
+    # ---- verified against real installs on the gameserver, 2026-09-26 ----
+    222840: {  # Left 4 Dead
+        "game": "Left 4 Dead", "port": 27015, "players": 8,
+        "linux": "srcds_run", "windows": "srcds.exe",
+        "args": "-console -game left4dead +map l4d_hospital01_apartment -port {port}",
+        "query_port_offset": 0,
+    },
+    237410: {  # Insurgency (2014) - Valve ships srcds_run with CRLF line
+        # endings, so it can't be executed; run the binary with its libs instead.
+        "game": "Insurgency", "port": 27015, "players": 16,
+        "linux": "srcds_linux", "windows": "srcds.exe",
+        "env": {"LD_LIBRARY_PATH": "{dir}:{dir}/bin"},
+        "args": "-console -game insurgency +map ministry +maxplayers {players} -port {port}",
+        "query_port_offset": 0,
+    },
+    403240: {  # Squad
+        "game": "Squad", "port": 7787, "players": 80,
+        "linux": "SquadGameServer.sh", "windows": "SquadGameServer.exe",
+        "args": "Port={port} QueryPort=27165 FIXEDMAXPLAYERS={players} RANDOM=NONE -log",
+        "query_port": 27165,
+    },
+    343050: {  # Don't Starve Together - needs a Klei cluster token (see README)
+        "game": "Don't Starve Together", "port": 10999, "players": 6,
+        "linux": "bin/dontstarve_dedicated_server_nullrenderer", "windows": None,
+        "args": "-console -cluster {name} -shard Master",
+        "cwd": "bin", "query_port": 27016,
+    },
+    1948160: {  # Euro Truck Simulator 2 - needs server_packages exported from the game
+        "game": "Euro Truck Simulator 2", "port": 27015, "players": 8,
+        "linux": "bin/linux_x64/server_launch.sh", "windows": None,
+        "args": "", "cwd": "bin/linux_x64", "query_port": 27016,
+    },
+    556450: {  # The Forest - Windows-only server
+        "game": "The Forest", "port": 27015, "players": 8,
+        "linux": None, "windows": "TheForestDedicatedServer.exe",
+        "args": ("-batchmode -nographics -serverip 0.0.0.0 -servergameport {port} "
+                 "-serverqueryport 27016 -serversteamport 8766 -servername \"{name}\" "
+                 "-serverplayers {players} -serverpassword {password} -inittype Continue -slot 1"),
+        "query_port": 27016, "runner": "wine",
+    },
+    2465200: {  # Sons Of The Forest - Windows-only server
+        "game": "Sons Of The Forest", "port": 8766, "players": 8,
+        "linux": None, "windows": "SonsOfTheForestDS.exe",
+        "args": ("-batchmode -nographics -userdatapath ./userdata "
+                 "-dedicatedserver.IpAddress 0.0.0.0 -dedicatedserver.GamePort {port} "
+                 "-dedicatedserver.QueryPort 27016 -dedicatedserver.BlobSyncPort 9700 "
+                 "-dedicatedserver.ServerName \"{name}\" -dedicatedserver.MaxPlayers {players} "
+                 "-dedicatedserver.Password {password}"),
+        "query_port": 27016, "runner": "wine",
+    },
+    3792580: {  # SCUM - Windows-only server (Unreal); Proton handles it better than Wine
+        "game": "SCUM", "port": 7777, "players": 32,
+        "linux": None, "windows": "SCUM/Binaries/Win64/SCUMServer.exe",
+        "args": "-log -port={port} -MaxPlayers={players}",
+        "query_port_offset": 2, "runner": "proton",
+    },
+    # ---- not yet downloaded: binaries below are from vendor docs, unverified ----
+    233780: {  # Arma 3 - owning account required to download
+        "game": "Arma 3", "port": 2302, "players": 32,
+        "linux": "arma3server_x64", "windows": "arma3server_x64.exe",
+        "args": "-port={port} -name=server -config=server.cfg -world=empty",
+        "query_port_offset": 1, "login": True,
+    },
+    223350: {  # DayZ - owning account required to download
+        "game": "DayZ", "port": 2302, "players": 60,
+        "linux": "DayZServer", "windows": "DayZServer_x64.exe",
+        "args": "-config=serverDZ.cfg -port={port} -profiles=profiles -dologs -adminlog",
+        "query_port": 27016, "login": True,
+    },
+    215350: {  # Killing Floor - owning account required; Windows-only (UCC.exe, no ucc-bin)
+        "game": "Killing Floor", "port": 7707, "players": 6,
+        "linux": None, "windows": "System/UCC.exe",
+        "args": "server KF-BioticsLab.rom?game=KFmod.KFGameType?VACSecured=true?MaxPlayers={players} -nohomedir",
+        "cwd": "System", "query_port_offset": 1, "login": True, "runner": "wine",
     },
 }
 
