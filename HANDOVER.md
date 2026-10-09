@@ -1,6 +1,6 @@
 # Handover — Game Server Installs + Discord Control Bot
 
-**Status:** code complete and pushed, 124 tests passing. Nothing has been
+**Status:** code complete and pushed, 241 tests passing. Nothing has been
 installed or run on real hardware yet. This document takes it from there.
 
 **Branch:** `claude/steam-dedicated-server-scan-m0g73g`
@@ -40,7 +40,7 @@ Run the tests any time to confirm nothing is broken:
 
 ```bash
 cd backend && python3 -m pytest tests/ -q --ignore=tests/test_webminpulse.py
-# expect: 124 passed
+# expect: 241 passed
 ```
 
 (`tests/test_webminpulse.py` is pre-existing and fails on a hardcoded
@@ -350,26 +350,46 @@ curl -X POST http://localhost:8001/api/gameservers \
        "server_appid":896660,"port":2456,"server_password":"changeme"}'
 ```
 
-**Of the 23 servers you are installing, 12 start with no extra configuration:**
+**All 23 servers have launch profiles** (32 games covered in total), so none
+needs `launch_cmd` set by hand. Factorio and Terraria are the exceptions —
+they're bundled, see §4.4.
 
-> 7 Days to Die · ARK: Survival Evolved · ARK: Survival Ascended · Garry's Mod ·
-> Icarus · Left 4 Dead 2 · Palworld · Rust · Space Engineers · Unturned ·
-> V Rising · Valheim
+**Nine of them also get a starter config written on first install**, rendered
+from `backend/gameconfigs/<appid>/` with the server's name, port, player count
+and passwords filled in:
 
-**The other 11 need `"launch_cmd": "<full command>"` on their record**, or
-`/start` refuses with *"No launch profile for this game."*:
+| Game | Config written |
+|---|---|
+| Arma 3 | `server.cfg` |
+| DayZ | `serverDZ.cfg` |
+| Don't Starve Together | `cluster/cluster.ini`, `cluster/Master/server.ini` |
+| Euro Truck Simulator 2 | `server_config.sii` |
+| Insurgency | `insurgency/cfg/server.cfg` |
+| Left 4 Dead | `left4dead/cfg/server.cfg` |
+| Sons Of The Forest | `userdata/dedicatedserver.cfg` |
+| Squad | `SquadGame/ServerConfig/Server.cfg`, `Admins.cfg` |
+| The Forest | `config.cfg` |
 
-> Arma 3 · DayZ · Don't Starve Together · Euro Truck Simulator 2 · Insurgency ·
-> Killing Floor · Left 4 Dead · SCUM · Sons Of The Forest · Squad · The Forest
+An existing config is **never overwritten** — reinstalling won't undo your
+tuning. Killing Floor and SCUM are deliberately excluded: both ship or generate
+their own configs, and replacing those loses defaults the game expects.
 
-Plus Factorio and Terraria, which are bundled (§4.4).
+### ⚠ Verify the binary paths after installing
 
-The cleanest fix is to add them to `backend/steam/profiles.py` rather than
-setting `launch_cmd` per record — then they work for every future server of that
-game, and `/install` picks up the right platform flag too. Copy the shape of an
-existing entry; the fields are `game`, `port`, `players`, `linux`, `windows`,
-`args`, and optionally `query_port`/`query_port_offset`, `rcon_port`,
-`save_cmd`, `runner`.
+Profile binary paths for the eleven added on 2026-10-09 come from each game's
+**documentation, not a verified install**. Vendors move binaries. Run this once
+the installs finish:
+
+```bash
+cd /opt/server-monitor-app/backend
+python3 -m steam.verify_profiles
+```
+
+It checks each installed directory for the binary its profile declares and, when
+one is missing, lists the plausible executables it did find so you can correct
+`linux`/`windows` in `steam/profiles.py`. Exit code 1 means something needs
+fixing. Do this **before** wiring up Discord — a wrong path surfaces as
+*"Server binary missing"* and nothing more useful.
 
 ### 7.3 Commands
 
@@ -455,7 +475,8 @@ rely on the engine's own save-on-exit. RCON save needs a password on the record.
 - [ ] `/players` shows 0, then 1 after you connect from the game client
 - [ ] `/stop valheim-main` as a non-starter → refused
 - [ ] `/stop valheim-main` as the starter → stops, world saved
-- [ ] `backend/tests` still 124 passing
+- [ ] `python3 -m steam.verify_profiles` exits 0
+- [ ] `backend/tests` still 241 passing
 
 ---
 
@@ -470,9 +491,11 @@ Be honest about these rather than discovering them at 2am.
 - **A2S query ports are per-game assumptions** (game port +1 by default, +0 for
   Source engine). Override with `query_port` in `profiles.py` if `/players`
   reports nothing for a server you know has people on it.
-- **11 of the 23 servers you are installing have no launch profile** and will
-  not start until one is written (§7.2). Valheim, ARK and Rust are covered;
-  Squad, Arma 3, DayZ and Don't Starve Together are not.
+- **Binary paths for 11 profiles are unverified** — written from game docs, not
+  a real install. `python3 -m steam.verify_profiles` checks them against what
+  SteamCMD actually laid down; expect to correct one or two.
+- **Starter configs are minimal.** They produce a joinable server, not a tuned
+  one. Arma 3 and DayZ in particular have far more settings worth reading up on.
 - **`/keepplaying` is open to anyone in the channel** — deliberate, see
   `memory/PRD.md` § Decisions. Do not "fix" it.
 - **Arma 3 and DayZ need a real Steam login** for SteamCMD.

@@ -107,11 +107,12 @@ PROFILES = {
         "args": "-console",
         "query_port_offset": 1, "runner": "wine",
     },
-    443030: {  # Conan Exiles
+    443030: {  # Conan Exiles — windows-only server, so it needs a compat layer
         "game": "Conan Exiles", "port": 7777, "players": 20,
         "linux": None, "windows": "ConanSandboxServer.exe",
         "args": "-log -MaxPlayers={players}",
         "query_port_offset": 1,
+        "runner": "wine",
     },
     1110390: {  # Unturned
         "game": "Unturned", "port": 27015, "players": 24,
@@ -125,6 +126,99 @@ PROFILES = {
         "args": "",
         "query_port_offset": 0,
     },
+    # ---- added 2026-10-09 -------------------------------------------------
+    # Binary paths and args below come from each game's server documentation,
+    # NOT from a verified install. Run `python3 -m steam.verify_profiles` after
+    # installing to confirm each binary exists, and correct anything it flags.
+    # `configs` lists files rendered from gameconfigs/<appid>/ on first install.
+    233780: {  # Arma 3
+        "game": "Arma 3", "port": 2302, "players": 32,
+        "linux": "arma3server_x64", "windows": "arma3server_x64.exe",
+        "args": "-port={port} -config=server.cfg -profiles=profile -world=empty -noSound",
+        "query_port_offset": 1,
+        "configs": ["server.cfg"],
+        "needs_steam_login": True,
+    },
+    223350: {  # DayZ — Steam declares this server app windows-only
+        "game": "DayZ", "port": 2302, "players": 60,
+        "linux": "DayZServer", "windows": "DayZServer_x64.exe",
+        "args": "-config=serverDZ.cfg -port={port} -profiles=profiles -dologs -adminlog -netlog",
+        "query_port": 27016,
+        "configs": ["serverDZ.cfg"],
+        "runner": "wine",
+        "needs_steam_login": True,
+    },
+    343050: {  # Don't Starve Together — native Linux (4.2G linux depot)
+        "game": "Don't Starve Together", "port": 10999, "players": 6,
+        "linux": "bin64/dontstarve_dedicated_server_nullrenderer_x64",
+        "windows": "bin64/dontstarve_dedicated_server_nullrenderer_x64.exe",
+        "args": "-console -cluster {name} -shard Master",
+        "query_port": 27016,
+        "configs": ["cluster/cluster.ini", "cluster/Master/server.ini"],
+    },
+    1948160: {  # Euro Truck Simulator 2
+        "game": "Euro Truck Simulator 2", "port": 27015, "players": 8,
+        "linux": "bin/linux_x64/eurotrucks2_server",
+        "windows": "bin/win_x64/eurotrucks2_server.exe",
+        "args": "",
+        "query_port_offset": 1,
+        "configs": ["server_config.sii"],
+    },
+    237410: {  # Insurgency (Source)
+        "game": "Insurgency", "port": 27015, "players": 16,
+        "linux": "srcds_run", "windows": "srcds.exe",
+        "args": "-console -game insurgency +map sinjar +maxplayers {players} -port {port}",
+        "query_port_offset": 0,
+        "configs": ["insurgency/cfg/server.cfg"],
+    },
+    215350: {  # Killing Floor (UE2) — no linux depot, run under wine
+        "game": "Killing Floor", "port": 7707, "players": 6,
+        "linux": None, "windows": "System/UCC.exe",
+        "args": "server KF-BioticsLab.rom?game=KFmod.KFGameType -nohomedir ini=KillingFloor.ini log=server.log",
+        "query_port_offset": 1,
+        # KillingFloor.ini ships with the server; edit it in place rather than
+        # generating one, or you lose every default the game expects.
+        "runner": "wine",
+    },
+    222840: {  # Left 4 Dead (Source)
+        "game": "Left 4 Dead", "port": 27015, "players": 8,
+        "linux": "srcds_run", "windows": "srcds.exe",
+        "args": "-console -game left4dead +map l4d_hospital01_apartment +maxplayers {players} -port {port}",
+        "query_port_offset": 0,
+        "configs": ["left4dead/cfg/server.cfg"],
+    },
+    3792580: {  # SCUM — windows-only server
+        "game": "SCUM", "port": 7777, "players": 64,
+        "linux": None, "windows": "SCUM/Binaries/Win64/SCUMServer.exe",
+        "args": "-port={port}",
+        "query_port_offset": 1,
+        # ServerSettings.ini is written by the server on first run; let it.
+        "runner": "wine",
+    },
+    2465200: {  # Sons Of The Forest — windows-only server
+        "game": "Sons Of The Forest", "port": 8766, "players": 8,
+        "linux": None, "windows": "SonsOfTheForestDS.exe",
+        "args": "-batchmode -nographics -dedicatedserver.ip 0.0.0.0",
+        "query_port": 27016,
+        "configs": ["userdata/dedicatedserver.cfg"],
+        "runner": "wine",
+    },
+    403240: {  # Squad — native Linux (13.6G linux depot)
+        "game": "Squad", "port": 7787, "players": 80,
+        "linux": "SquadGameServer.sh", "windows": "SquadGameServer.exe",
+        "args": "Port={port} QueryPort=27165 FIXEDMAXPLAYERS={players} RANDOM=ALWAYS",
+        "query_port": 27165,
+        "configs": ["SquadGame/ServerConfig/Server.cfg", "SquadGame/ServerConfig/Admins.cfg"],
+    },
+    556450: {  # The Forest — windows-only server
+        "game": "The Forest", "port": 27015, "players": 8,
+        "linux": None, "windows": "TheForestDedicatedServer.exe",
+        "args": "-batchmode -nographics -serverip 0.0.0.0 -serverport {port} -configfilepath config.cfg",
+        "query_port_offset": 1,
+        "configs": ["config.cfg"],
+        "runner": "wine",
+    },
+
     2089300: {  # Icarus
         "game": "ICARUS", "port": 17777, "players": 8,
         "linux": "IcarusServer.sh", "windows": "IcarusServer.exe",
@@ -172,6 +266,16 @@ def save_command(rec: dict):
     if not prof.get("save_cmd"):
         return None
     return prof.get("rcon_port"), prof["save_cmd"]
+
+
+def config_files(rec: dict) -> list:
+    """Config files this game needs, rendered from gameconfigs/ on install."""
+    return list((get(rec.get("server_appid")) or {}).get("configs") or [])
+
+
+def needs_steam_login(rec: dict) -> bool:
+    """True when SteamCMD rejects anonymous login for this server app."""
+    return bool((get(rec.get("server_appid")) or {}).get("needs_steam_login"))
 
 
 def runner(rec: dict) -> str:

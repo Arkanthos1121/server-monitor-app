@@ -218,3 +218,35 @@ updates and notify. (User asked to pause and check in at ~50 credits.)
   A2S_PLAYER, which is per-game, fragile, and pointless for a friend group. The veto is a
   low-stakes action: its worst case is a server staying up slightly longer, which the idle
   reaper cleans up anyway. Leave it open.
+
+## Launch Profiles for the Remaining 11 + Starter Configs (2026-10-09, session 9)
+- User confirmed storage is DONE on the gameserver: Windows C:/Recovery deleted, nvme0n1p2 is
+  now 230.9G ext4 labelled `gameservers` at /opt/gameservers. EFI kept. Claude Code 2.1.295
+  installed there. /mnt/plex-media is a mergerfs FUSE union (3x7.3T = 22T) - deliberately NOT
+  used for game servers: FUSE + SteamCMD small-file I/O and file locking is a bad combination.
+- Added 11 profiles (32 total): Arma 3, DayZ, Don't Starve Together, ETS2, Insurgency,
+  Killing Floor, Left 4 Dead, SCUM, Sons Of The Forest, Squad, The Forest.
+- Runner determined by checking each server app's Steam depots. Depot SIZE is NOT a reliable
+  signal: Source-engine games ship ~0.1G OS depots with content in shared depots, so a small
+  linux depot does not mean "no linux build". Used `common.oslist` as the authority instead.
+  Native: DST (4.2G linux depot), Squad (13.6G), Arma 3, ETS2, Insurgency, L4D.
+  wine: DayZ, SCUM, Sons Of The Forest, The Forest, Killing Floor.
+- BUG CAUGHT BY NEW TEST: Conan Exiles (443030) had linux=None and no runner, so it defaulted
+  to native and could never have started. Now runner=wine.
+- Starter configs in `backend/gameconfigs/<appid>/<rel>`, rendered on install for 9 games.
+  Uses string.Template `$name` placeholders, NOT `{name}` - Arma/DayZ/SII configs are full of
+  literal braces and str.format would mangle them. Never overwrites an existing file (a
+  reinstall must not undo hand-tuning). Written over base64 via run_shell so it works on a
+  remote SSH host too. Killing Floor and SCUM deliberately excluded: they ship/generate their
+  own configs.
+- `python3 -m steam.verify_profiles` checks installed dirs for each declared binary and, when
+  missing, lists plausible executables found (filtering steamclient/crashhandler noise).
+  Needed because the 11 new binary paths come from game documentation, not verified installs.
+- 241 tests passing (was 124).
+
+### Known Limitations
+- Binary paths for the 11 new profiles are UNVERIFIED against real installs. Run
+  verify_profiles after installing and expect to fix one or two.
+- Starter configs are minimal - joinable, not tuned.
+- DayZ: Steam declares the server app windows-only so it is set to wine, but a native
+  DayZServer Linux binary may exist in the install. verify_profiles will show it.

@@ -10,11 +10,13 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import base64
 import shlex
 import signal
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from string import Template
 from typing import Optional
 
 import rcon
@@ -27,6 +29,8 @@ AUTO_STOP_HOURS = int(os.environ.get("GAMESERVER_IDLE_STOP_HOURS",
 MAX_EXTEND_HOURS = int(os.environ.get("GAMESERVER_MAX_EXTEND_HOURS", "24"))
 WARN_BEFORE_MIN = int(os.environ.get("GAMESERVER_WARN_BEFORE_MIN", "15"))
 BASE_DIR = Path(os.environ.get("GAMESERVER_BASE_DIR", "/opt/gameservers"))
+# Starter configs shipped with the repo, rendered into a server on first install.
+CONFIG_DIR = Path(__file__).parent / "gameconfigs"
 STEAMCMD = os.environ.get("STEAMCMD_PATH", "steamcmd")
 STOP_GRACE_SECONDS = int(os.environ.get("GAMESERVER_STOP_GRACE", "30"))
 # Longer than a plain stop: the engine has to finish writing the world.
@@ -275,7 +279,14 @@ async def steamcmd_install(rec: dict, validate: bool = False) -> tuple[bool, str
     if code == 127:
         where = f"{SSH_USER}@{SSH_HOST}" if remote() else "this host"
         return False, f"steamcmd not found on {where} (set STEAMCMD_PATH)"
-    return code == 0, out[-1500:]
+    if code != 0:
+        return False, out[-1500:]
+
+    written = await write_configs(rec)
+    tail = out[-1500:]
+    if written:
+        tail += f"\n\nStarter configs written: {', '.join(written)}"
+    return True, tail
 
 
 async def spawn(rec: dict) -> tuple[Optional[int], Optional[int], str]:
@@ -480,3 +491,54 @@ async def save_then_stop(rec: dict, grace: int = None) -> str:
         grace = SAVE_STOP_GRACE
     how = await terminate(rec["pid"], grace=grace)
     return f"{how} ({save_msg})" if attempted else how
+
+
+# ------------------------------------------------------------- configs -----
+def render_config(appid: int, rel: str, rec: dict) -> Optional[str]:
+    """Fill a shipped config template for this server. None if no template.
+
+    Templates use $name / $port style placeholders rather than {name}, because
+    Arma, DayZ and SII configs are full of literal braces.
+    """
+    src = CONFIG_DIR / str(appid) / rel
+    if not src.is_file():
+        return None
+    prof = profiles.get(appid) or {}
+    values = {
+        "name": rec.get("name", "server"),
+        "port": rec.get("port") or prof.get("port") or 27015,
+        "players": rec.get("max_players") or prof.get("players") or 8,
+        "password": rec.get("server_password") or "",
+        "admin_password": rec.get("rcon_password") or rec.get("server_password") or "",
+    }
+    return Template(src.read_text()).safe_substitute(values)
+
+
+async def write_configs(rec: dict) -> list[str]:
+    """Render this game's configs into its install dir. Never overwrites.
+
+    An existing config is someone's tuning; clobbering it on a reinstall would
+    quietly undo their work, so only missing files are written.
+    """
+    appid = rec.get("server_appid")
+    wanted = profiles.config_files(rec)
+    if not appid or not wanted:
+        return []
+    d = install_dir(rec)
+    written = []
+    for rel in wanted:
+        body = render_config(int(appid), rel, rec)
+        if body is None:
+            logger.warning(f"no config template for {appid}/{rel}")
+            continue
+        target = d / rel
+        blob = base64.b64encode(body.encode()).decode()
+        # Write only if absent, and create the parent directory first.
+        cmd = (f"if [ -f {shlex.quote(str(target))} ]; then echo SKIP; else "
+               f"mkdir -p {shlex.quote(str(target.parent))} && "
+               f"echo {shlex.quote(blob)} | base64 -d > {shlex.quote(str(target))} "
+               f"&& echo WROTE; fi")
+        code, out = await run_shell(cmd, timeout=60)
+        if code == 0 and "WROTE" in out:
+            written.append(rel)
+    return written
