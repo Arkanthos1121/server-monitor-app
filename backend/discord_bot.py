@@ -104,7 +104,9 @@ def build(db):
         import discord
         from discord import app_commands
     except ImportError:
-        logger.warning("discord: DISCORD_BOT_TOKEN set but discord.py is not installed")
+        logger.error("discord: DISCORD_BOT_TOKEN is set but discord.py is not "
+                     "installed. Rebuild the image (docker compose up -d --build) "
+                     "or pip install 'discord.py>=2.3.2'.")
         return None
 
     intents = discord.Intents.default()
@@ -303,8 +305,23 @@ def build(db):
             else:
                 await tree.sync()
             logger.info(f"discord: logged in as {bot.user}, commands synced")
+            if not GUILD_ID:
+                logger.warning("discord: DISCORD_GUILD_ID is not set, so commands "
+                               "were synced GLOBALLY - Discord can take up to an "
+                               "hour to show them. Set it to your server's ID for "
+                               "an instant sync.")
+            uid = await _owner_user_id()
+            if not uid:
+                logger.error("discord: no WebminPulse account matches "
+                             f"DISCORD_OWNER_EMAIL={OWNER_EMAIL!r}. Every command "
+                             "will refuse until this points at a registered user.")
         except Exception as e:
-            logger.warning(f"discord: command sync failed: {e}")
+            if "Missing Access" in str(e) or "50001" in str(e):
+                logger.error("discord: command sync refused (Missing Access). The bot "
+                             "was invited without the applications.commands scope - "
+                             "re-invite it with both 'bot' and 'applications.commands'.")
+            else:
+                logger.error(f"discord: command sync failed: {e}")
 
     _bot = bot
     return bot
@@ -324,10 +341,22 @@ async def announce(text: str):
 
 
 async def run(db):
+    """Start the bot. Failures are logged loudly: a silent bot is the hardest
+    thing to debug, so every failure mode names its own fix."""
     bot = build(db)
     if not bot:
         return
     try:
         await bot.start(TOKEN)
     except Exception as e:
-        logger.warning(f"discord: bot stopped: {e}")
+        name = type(e).__name__
+        if "LoginFailure" in name or "Unauthorized" in name:
+            logger.error("discord: DISCORD_BOT_TOKEN was rejected. Regenerate it at "
+                         "discord.com/developers > your app > Bot > Reset Token, and "
+                         "make sure you copied the BOT token, not the Client Secret.")
+        elif "PrivilegedIntents" in name:
+            logger.error("discord: the bot is asking for privileged intents that are "
+                         "not enabled for it. Enable them under Bot > Privileged "
+                         "Gateway Intents, or leave them off - this bot needs none.")
+        else:
+            logger.error(f"discord: bot stopped ({name}): {e}")
