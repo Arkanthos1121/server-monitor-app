@@ -48,61 +48,43 @@ cd backend && python3 -m pytest tests/ -q --ignore=tests/test_webminpulse.py
 
 ---
 
-## 2. The target machine
+## 2. The target machine — storage is DONE
 
-Confirmed layout as of 2026-09-17:
+Verified on the gameserver, 2026-10-09:
 
 ```
-nvme0n1   476.9G  AirDisk 512GB SSD          ← system disk, dual-boot
-  p1        100M  vfat  SYSTEM  /boot/efi    ← shared EFI. NEVER DELETE.
-  p2        128M  (Microsoft Reserved)
-  p3      230.8G  FSTYPE BLANK               ← believed Windows C:, UNCONFIRMED
-  p4      244.1G  ext4  /                    ← Linux root
-  p5        1.8G  ntfs  Recovery
+nvme0n1   476.9G  AirDisk 512GB SSD
+  p1        100M  vfat  SYSTEM        /boot/efi         ← NEVER DELETE
+  p2      230.9G  ext4  gameservers   /opt/gameservers   ← reclaimed from Windows
+  p4      244.1G  ext4                /
 nvme1n1   953.9G  Predator SSD GM7000 1TB
-  p1        512M  vfat  bootfs               ← DO NOT TOUCH
-  p2      953.4G  ext4  rootfs               ← looks like a Raspberry Pi OS install
-sda         7.3T  FireCuda HDD Hub
-  p2        7.3T  ext4  ExternalDrive  /mnt/plex-media
+  p1        512M  vfat  bootfs                           ← DO NOT TOUCH
+  p2      953.4G  ext4  rootfs                           ← Raspberry Pi OS install
+sda/sdb/sdc  3 x 7.3T  → /mnt/plex-disk{1,2,3}
+  pooled by mergerfs (FUSE) as 22T at /mnt/plex-media
 ```
 
-**Two hard rules:**
+**Phase 1 is complete.** Windows C: and its Recovery partition were deleted and
+the space became `nvme0n1p2` — 230.9 GB of ext4, labelled `gameservers`, mounted
+at `/opt/gameservers`. The EFI partition was correctly kept. Skip §3 entirely;
+it is retained only as a record of what was done.
 
-- `nvme1n1` has a `bootfs`/`rootfs` pair — the standard Raspberry Pi OS layout.
-  It is not spare space. Do not format it.
-- `nvme0n1p1` is the EFI partition and boots Linux as well as Windows.
-  Deleting it makes the machine unbootable.
+That is comfortably more than the ~155 GB needed.
 
-### Storage decision
+**Do not relocate game servers to `/mnt/plex-media`.** It has 8.7 TB free and
+looks tempting, but it is a **mergerfs FUSE union** across three disks. SteamCMD
+and running servers do heavy small-file I/O and rely on file locking, both of
+which behave badly on a FUSE union — expect corrupted installs and servers that
+hang on save. The NVMe partition is the right home.
 
-Two viable homes for `/opt/gameservers`:
-
-| Option | Space | Risk | Notes |
-|---|---|---|---|
-| **A. `/mnt/plex-media`** (7.3T) | plenty | none | No partitioning at all. Just `mkdir`. Recommended if it has ~200 GB free. |
-| **B. Reclaim Windows** (p3) | ~230 GB | moderate | Destroys Windows permanently. NVMe speed, which game servers barely use. |
-
-Check option A first:
-
-```bash
-df -h /mnt/plex-media /
-```
-
-If that has room, **take it** and skip Phase 1 entirely:
-
-```bash
-sudo mkdir -p /mnt/plex-media/gameservers
-sudo ln -s /mnt/plex-media/gameservers /opt/gameservers
-```
-
-Game servers are RAM- and CPU-bound once a world is loaded. NVMe buys you
-slightly faster startup and nothing else.
+**Standing rule:** `nvme1n1` carries a `bootfs`/`rootfs` pair, the standard
+Raspberry Pi OS layout. It is not spare capacity. Do not format it.
 
 ---
 
-## 3. Phase 1 — Reclaim the Windows partition (only if Option B)
+## 3. Phase 1 — Reclaim the Windows partition  ✅ ALREADY DONE
 
-**Skip this whole phase if you used the Plex drive.**
+**Completed 2026-10-09. Kept as a record; do not re-run any of it.**
 
 ### 3.1 Identify p3 before touching anything
 
@@ -463,7 +445,8 @@ rely on the engine's own save-on-exit. RCON save needs a password on the record.
 
 ## 9. Verification checklist
 
-- [ ] `df -h /opt/gameservers` shows the expected free space
+- [x] `/opt/gameservers` exists — 230.9 GB ext4 on nvme0n1p2
+- [ ] `df -h /opt/gameservers` confirms free space and `steam` owns it
 - [ ] Valheim installs and `valheim_server.x86_64` exists
 - [ ] Backend logs `WebminPulse backend started`
 - [ ] `curl localhost:8001/api/` returns ok
