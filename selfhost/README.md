@@ -151,6 +151,9 @@ sudo apt install steamcmd
 
 ## Creating the Discord bot
 
+> Bot online but no slash commands showing? That's the common failure and it has
+> its own walkthrough: **[DISCORD_SETUP.md](DISCORD_SETUP.md)**.
+
 1. <https://discord.com/developers/applications> → **New Application** → **Bot** → copy the token.
 2. Invite it with the `bot` and `applications.commands` scopes.
 3. Put the token in `.env` as `DISCORD_BOT_TOKEN`, set `DISCORD_GUILD_ID` to your

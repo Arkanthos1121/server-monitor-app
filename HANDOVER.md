@@ -346,6 +346,9 @@ Leave those blank to run everything on one box.
 
 ### 7.1 Create and connect it
 
+> Step-by-step walkthrough, including the "online but no slash commands" case:
+> `selfhost/DISCORD_SETUP.md`.
+
 1. <https://discord.com/developers/applications> → **New Application** → **Bot** → copy the token
 2. Invite it with the `bot` and `applications.commands` scopes
 3. Fill in `.env`:
