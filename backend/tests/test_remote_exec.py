@@ -160,3 +160,69 @@ async def test_remote_terminate_noop_when_already_dead(as_remote, captured):
 
 async def _always_alive(rec):
     return True
+
+
+# ---- launch shapes verified against real installs --------------------------
+def test_wine_launch_passes_env_through_env_not_as_the_program():
+    # spawn() prefixes `setsid nohup`, which would exec "WINEPREFIX=..." literally.
+    cmd = gs.build_launch({"name": "vr", "server_appid": 1829350, "port": 9876})
+    assert cmd.startswith("env WINEPREFIX=")
+    assert "VRisingServer.exe" in cmd and "xvfb-run" in cmd
+
+
+def test_proton_launch_passes_env_through_env():
+    cmd = gs.build_launch({"name": "asa", "server_appid": 2430930, "port": 7777})
+    assert cmd.startswith("env STEAM_COMPAT_DATA_PATH=")
+    assert "ArkAscendedServer.exe" in cmd
+
+
+async def test_spawn_enters_the_profile_working_dir(as_remote, captured, monkeypatch):
+    calls, rc = captured
+    rc["out"] = b"777\n"
+    monkeypatch.setattr(gs, "alive", _always_alive)
+    await gs.spawn({"name": "trucks", "server_appid": 1948160, "port": 27015})
+    assert "/opt/gameservers/trucks-1948160/bin/linux_x64" in calls[0][-1]
+
+
+async def test_login_game_refuses_without_a_cached_account(as_remote, captured, monkeypatch):
+    calls, _rc = captured
+    monkeypatch.setattr(gs, "STEAMCMD_LOGIN", "")
+    ok, msg = await gs.steamcmd_install({"name": "a3", "server_appid": 233780})
+    assert not ok and "STEAMCMD_LOGIN" in msg and calls == []
+
+
+async def test_login_game_uses_the_cached_account(as_remote, captured, monkeypatch):
+    calls, _rc = captured
+    monkeypatch.setattr(gs, "STEAMCMD_LOGIN", "someuser")
+    await gs.steamcmd_install({"name": "a3", "server_appid": 233780})
+    assert "+login someuser" in calls[0][-1] and "anonymous" not in calls[0][-1]
+
+
+async def test_l4d2_installs_windows_then_linux(as_remote, captured):
+    calls, _rc = captured
+    await gs.steamcmd_install({"name": "l4d2", "server_appid": 222860})
+    cmd = calls[0][-1]
+    assert cmd.index("PlatformType windows") < cmd.index("PlatformType linux")
+
+
+def test_profile_env_is_applied_to_native_launch():
+    cmd = gs.build_launch({"name": "ins", "server_appid": 237410, "port": 27015})
+    assert cmd.startswith("env LD_LIBRARY_PATH=")
+    assert "/opt/gameservers/ins-237410/bin" in cmd and cmd.split()[2].endswith("srcds_linux")
+
+
+async def test_proton_stop_reaches_the_whole_prefix(as_remote, captured):
+    # Proton detaches the game from spawn()'s process group; killing the group
+    # alone left SCUM running. The prefix's wineserver must be told too.
+    calls, rc = captured
+    rc["out"] = b"CLEAN\n"
+    assert await gs.stop_prefix({"name": "scum", "server_appid": 3792580}, 5) == "prefix stopped cleanly"
+    cmd = calls[0][-1]
+    assert "scum-3792580/compatdata/pfx" in cmd
+    assert cmd.index("-k 15") < cmd.index("-w") < cmd.index("-k 9")
+
+
+async def test_native_stop_skips_the_prefix_step(as_remote, captured):
+    calls, _rc = captured
+    assert await gs.stop_prefix({"name": "v", "server_appid": 896660}, 5) is None
+    assert calls == []

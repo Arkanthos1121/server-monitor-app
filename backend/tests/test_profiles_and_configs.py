@@ -55,9 +55,9 @@ def test_wine_and_proton_profiles_declare_a_windows_binary():
 
 
 def test_games_needing_a_steam_login_are_flagged():
-    """Arma 3 and DayZ reject anonymous SteamCMD; that has to be discoverable."""
-    flagged = {p["game"] for p in profiles.PROFILES.values() if p.get("needs_steam_login")}
-    assert "Arma 3" in flagged and "DayZ" in flagged
+    """Arma 3, DayZ and Killing Floor reject anonymous SteamCMD."""
+    flagged = {p["game"] for p in profiles.PROFILES.values() if p.get("login")}
+    assert {"Arma 3", "DayZ", "Killing Floor"} <= flagged
     assert profiles.needs_steam_login({"server_appid": 233780})
     assert not profiles.needs_steam_login({"server_appid": 896660})
 
@@ -206,12 +206,14 @@ def test_verifier_reports_uninstalled_rather_than_failing(tmp_path):
                                  tmp_path)["state"] == "not installed"
 
 
-def test_verifier_checks_the_windows_binary_for_wine_profiles(tmp_path):
-    root = tmp_path / "3792580"
-    root.mkdir()
-    row = verify_profiles.check(3792580, profiles.PROFILES[3792580], tmp_path)
-    assert row["runner"] == "wine"
-    assert row["declared"].endswith(".exe")
+@pytest.mark.parametrize("appid", sorted(
+    a for a, p in profiles.PROFILES.items() if p.get("runner") in ("wine", "proton")))
+def test_verifier_checks_the_windows_binary_for_compat_profiles(appid, tmp_path):
+    """A Wine/Proton server is checked for its .exe, never a Linux path."""
+    (tmp_path / str(appid)).mkdir()
+    row = verify_profiles.check(appid, profiles.PROFILES[appid], tmp_path)
+    assert row["runner"] in ("wine", "proton")
+    assert row["declared"] == profiles.PROFILES[appid]["windows"]
 
 
 def test_verifier_finds_slug_suffixed_install_dirs(tmp_path):

@@ -49,7 +49,17 @@ SSH_KEY = os.environ.get("GAMESERVER_SSH_KEY", "").strip()
 # depots, since SteamCMD otherwise serves the host platform's build.
 PROTON_PATH = os.environ.get("PROTON_PATH", "/opt/proton/proton")
 WINE_PATH = os.environ.get("WINE_PATH", "wine")
+# Ubuntu's wine package leaves wineserver off PATH
+# (/usr/lib/x86_64-linux-gnu/wine/wineserver); point this at it, or symlink it.
+WINESERVER_PATH = os.environ.get("WINESERVER_PATH", "wineserver")
 STEAM_ROOT = os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH", "/opt/steam")
+# Wine-hosted Unity servers want a display even when told -nographics.
+XVFB_RUN = os.environ.get("XVFB_RUN", "xvfb-run -a")
+
+# Some server apps (Arma 3, DayZ, Killing Floor) refuse anonymous SteamCMD
+# logins. Log in once by hand as this account so SteamCMD caches the session;
+# installs of profiles marked `login: True` then reuse it without a password.
+STEAMCMD_LOGIN = os.environ.get("STEAMCMD_LOGIN", "").strip()
 
 
 def remote() -> bool:
@@ -253,29 +263,55 @@ def build_launch(rec: dict) -> Optional[str]:
     )
     exe = shlex.quote(str(d / binary))
 
+    # Environment goes through `env`: spawn() runs this after `setsid nohup`,
+    # which would otherwise try to execute "VAR=value" as the program name.
     if run_with == "proton":
         prefix = shlex.quote(str(d / "compatdata"))
-        return (f"STEAM_COMPAT_DATA_PATH={prefix} "
+        return (f"env STEAM_COMPAT_DATA_PATH={prefix} "
                 f"STEAM_COMPAT_CLIENT_INSTALL_PATH={shlex.quote(STEAM_ROOT)} "
                 f"{shlex.quote(PROTON_PATH)} run {exe} {args}").strip()
     if run_with == "wine":
         prefix = shlex.quote(str(d / "wineprefix"))
-        return f"WINEPREFIX={prefix} {shlex.quote(WINE_PATH)} {exe} {args}".strip()
+        return (f"env WINEPREFIX={prefix} WINEDEBUG=-all {XVFB_RUN} "
+                f"{shlex.quote(WINE_PATH)} {exe} {args}").strip()
+    if prof.get("env"):
+        pairs = " ".join(f"{k}={shlex.quote(v.format(dir=d))}"
+                         for k, v in prof["env"].items())
+        return f"env {pairs} {exe} {args}".strip()
     return f"{exe} {args}".strip()
+
+
+def launch_cwd(rec: dict) -> Path:
+    """Directory the server starts in. Some launchers (ETS2, Don't Starve
+    Together) use paths relative to their own bin folder."""
+    prof = profiles.get(rec.get("server_appid")) or {}
+    sub = None if rec.get("launch_cmd") else prof.get("cwd")
+    return install_dir(rec) / sub if sub else install_dir(rec)
 
 
 async def steamcmd_install(rec: dict, validate: bool = False) -> tuple[bool, str]:
     """Install or update the server's Steam app. Returns (ok, tail_of_output)."""
     d = install_dir(rec)
-    d.mkdir(parents=True, exist_ok=True)
-    # +@sSteamCmdForcePlatformType must precede +login to take effect.
-    platform = ""
-    if profiles.runner(rec) in ("proton", "wine"):
-        platform = "+@sSteamCmdForcePlatformType windows "
-    cmd = (f"mkdir -p {shlex.quote(str(d))} && {shlex.quote(STEAMCMD)} "
-           f"{platform}+force_install_dir {shlex.quote(str(d))} +login anonymous "
-           f"+app_update {int(rec['server_appid'])}{' validate' if validate else ''} +quit")
-    code, out = await run_shell(cmd)
+    prof = profiles.get(rec.get("server_appid")) or {}
+    login = "anonymous"
+    if prof.get("login"):
+        if not STEAMCMD_LOGIN:
+            return False, ("This server needs a Steam account that owns the game. "
+                           "Set STEAMCMD_LOGIN and log in once by hand to cache it.")
+        login = shlex.quote(STEAMCMD_LOGIN)
+    # +@sSteamCmdForcePlatformType must precede +login to take effect. A few
+    # apps (Left 4 Dead 2) reject a Linux-only install and need the Windows
+    # depots laid down first, then Linux on top.
+    platforms = prof.get("platforms") or (
+        ["windows"] if profiles.runner(rec) in ("proton", "wine") else [None])
+    steps = []
+    for plat in platforms:
+        force = f"+@sSteamCmdForcePlatformType {plat} " if plat else ""
+        steps.append(f"{shlex.quote(STEAMCMD)} {force}+force_install_dir {shlex.quote(str(d))} "
+                     f"+login {login} +app_update {int(rec['server_appid'])}"
+                     f"{' validate' if validate else ''} +quit")
+    cmd = f"mkdir -p {shlex.quote(str(d))} && " + " && ".join(steps)
+    code, out = await run_shell(cmd, timeout=3600)
     if code == 127:
         where = f"{SSH_USER}@{SSH_HOST}" if remote() else "this host"
         return False, f"steamcmd not found on {where} (set STEAMCMD_PATH)"
@@ -300,7 +336,10 @@ async def spawn(rec: dict) -> tuple[Optional[int], Optional[int], str]:
     # setsid detaches the server so it survives the SSH session / backend restart,
     # and puts it in its own process group so stopping it takes the children too.
     launch = (f"cd {shlex.quote(str(d))} 2>/dev/null || exit 66; "
-              f"setsid nohup {cmd} >> {shlex.quote(str(logs))} 2>&1 < /dev/null & echo $!")
+              f"cd {shlex.quote(str(launch_cwd(rec)))} || exit 66; "
+              + (f"mkdir -p {shlex.quote(str(d / 'compatdata'))}; "
+                 if not rec.get("launch_cmd") and profiles.runner(rec) == "proton" else "")
+              + f"setsid nohup {cmd} >> {shlex.quote(str(logs))} 2>&1 < /dev/null & echo $!")
     code, out = await run_shell(launch, timeout=60)
     if code == 66:
         return None, None, f"Not installed yet ({d} missing) - install it first."
@@ -462,6 +501,32 @@ def human_bytes(n: int) -> str:
 
 
 # ------------------------------------------------------------ save/stop ----
+async def stop_prefix(rec: dict, grace: int) -> Optional[str]:
+    """Stop every process in a Proton/Wine server's prefix.
+
+    Proton starts the game in a session of its own, outside the process group
+    spawn() created, so signalling that group only kills the launcher and the
+    game keeps running (seen with SCUM). wineserver reaches everything in the
+    prefix: SIGTERM first, wait out the grace period, then SIGKILL.
+    """
+    run_with = profiles.runner(rec)
+    if rec.get("launch_cmd") or run_with not in ("proton", "wine"):
+        return None
+    d = install_dir(rec)
+    if run_with == "proton":
+        prefix = d / "compatdata" / "pfx"
+        ws = shlex.quote(str(Path(PROTON_PATH).parent / "files" / "bin" / "wineserver"))
+    else:
+        prefix = d / "wineprefix"
+        ws = shlex.quote(WINESERVER_PATH)
+    cmd = (f"export WINEPREFIX={shlex.quote(str(prefix))}; "
+           f"{ws} -k 15 2>/dev/null; "
+           f"if timeout {int(grace)} {ws} -w 2>/dev/null; then echo CLEAN; "
+           f"else {ws} -k 9 2>/dev/null; echo KILLED; fi")
+    _code, out = await run_shell(cmd, timeout=int(grace) + 30)
+    return "prefix stopped cleanly" if "CLEAN" in out else "prefix force-killed"
+
+
 async def save_world(rec: dict) -> tuple[bool, str]:
     """Ask the server to flush its world to disk, if it speaks RCON.
 
@@ -476,7 +541,8 @@ async def save_world(rec: dict) -> tuple[bool, str]:
     if not password:
         return False, "no RCON password configured; relying on save-on-exit"
     host = SSH_HOST if remote() else "127.0.0.1"
-    ok, msg = await rcon.save_world(host, port or 27020, password, command)
+    proto = (profiles.get(rec.get("server_appid")) or {}).get("rcon_proto", "source")
+    ok, msg = await rcon.save_world(host, port or 27020, password, command, proto=proto)
     return True, msg if ok else f"save failed ({msg}); stopping anyway"
 
 
@@ -489,6 +555,7 @@ async def save_then_stop(rec: dict, grace: int = None) -> str:
     attempted, save_msg = await save_world(rec)
     if grace is None:
         grace = SAVE_STOP_GRACE
+    await stop_prefix(rec, grace)
     how = await terminate(rec["pid"], grace=grace)
     return f"{how} ({save_msg})" if attempted else how
 

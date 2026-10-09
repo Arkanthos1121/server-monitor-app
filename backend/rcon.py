@@ -83,11 +83,59 @@ async def execute(host: str, port: int, password: str, command: str,
             pass
 
 
+async def telnet_execute(host: str, port: int, password: str, command: str,
+                         done_marker: str = "World saved",
+                         timeout: float = 30.0) -> str:
+    """7 Days to Die's console is line-based telnet, not Source RCON.
+
+    It asks for a password, confirms the logon, then echoes log lines; the
+    save is complete once `done_marker` appears.
+    """
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), 10)
+    except (OSError, asyncio.TimeoutError) as e:
+        raise RconError(f"cannot reach telnet console at {host}:{port} ({e})") from e
+
+    async def until(marker: str) -> str:
+        seen = b""
+        while marker.lower().encode() not in seen.lower():
+            chunk = await asyncio.wait_for(reader.read(4096), timeout)
+            if not chunk:
+                raise RconError("console closed the connection")
+            seen += chunk
+        return seen.decode("utf-8", "replace")
+
+    try:
+        await until("password")
+        writer.write(password.encode() + b"\r\n")
+        await writer.drain()
+        logon = await until("logon")
+        if "successful" not in logon.lower():
+            raise RconError("telnet password rejected")
+        writer.write(command.encode() + b"\r\n")
+        await writer.drain()
+        await until(done_marker)
+        writer.write(b"exit\r\n")
+        return f"'{command}' acknowledged"
+    except asyncio.TimeoutError as e:
+        raise RconError(f"no '{done_marker}' within {timeout:.0f}s") from e
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
 async def save_world(host: str, port: int, password: str, command: str,
-                     timeout: float = DEFAULT_TIMEOUT) -> tuple[bool, str]:
+                     timeout: float = DEFAULT_TIMEOUT,
+                     proto: str = "source") -> tuple[bool, str]:
     """Best-effort save. Never raises - a failed save must not block a shutdown,
     it just has to be reported honestly."""
     try:
+        if proto == "telnet":
+            return True, await telnet_execute(host, port, password, command)
         reply = await execute(host, port, password, command, timeout)
         return True, (reply.strip() or f"'{command}' acknowledged")
     except RconError as e:

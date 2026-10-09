@@ -88,3 +88,10 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Runtime secrets and operational backups — never commit
+selfhost/keys/
+selfhost/backups/
+*.pre-container-update-*
+id_ed25519*
+*.archive.gz

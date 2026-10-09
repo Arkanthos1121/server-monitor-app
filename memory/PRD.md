@@ -250,3 +250,52 @@ updates and notify. (User asked to pause and check in at ~50 credits.)
 - Starter configs are minimal - joinable, not tuned.
 - DayZ: Steam declares the server app windows-only so it is set to wine, but a native
   DayZServer Linux binary may exist in the install. verify_profiles will show it.
+
+## Merged Hardware Fixes from the Gameserver (2026-10-09, session 10)
+Work done in a local Claude session ON the gameserver, merged from branch
+`gameserver-hardware-fixes`. These came from actually running the code and found real bugs
+I had written. Their verified values take precedence over anything from vendor docs.
+
+BUGS FIXED (all mine):
+- a2s.py used `remote_addr=` which makes a CONNECTED UDP socket; a server bound to 0.0.0.0
+  replies from a different source address (always so across a Docker bridge), so every reply
+  was dropped, every player count was None, and idle shutdown silently fell back to uptime.
+  Now an unconnected socket with explicit sendto().
+- build_launch returned "VAR=value binary ..." and spawn() runs `setsid nohup <cmd>`, so nohup
+  tried to exec "VAR=value" as the program. NO wine/proton server could ever have started.
+  Now prefixed with `env`.
+- terminate() only signalled the process group, but Proton starts the game in its own session
+  outside it, so stopping killed the launcher and left the game running (seen with SCUM).
+  New stop_prefix() uses `wineserver -k` to reach everything in the prefix.
+- steamcmd_install used the default 900s run_shell timeout; a 21GB ARK download exceeds it.
+  Now 3600s.
+- Valheim profile had `-public 0`, which makes the server ignore A2S queries entirely —
+  blinding the very feature the idle rule depends on. Now `-public 1`.
+- 7 Days to Die: its console is TELNET, not Source RCON. New rcon.telnet_execute(); profile
+  carries `rcon_proto: telnet`. Port moved 8081 -> 8091 (8081 collided with qBittorrent).
+- ARK SE/SA needed RCONEnabled/RCONPort/ServerAdminPassword in the launch args or save_cmd
+  could never work.
+- V Rising and Icarus are Windows-only (I had a .exe listed as the Linux binary for V Rising).
+- Insurgency ships srcds_run with CRLF endings so it cannot execute; run srcds_linux with
+  LD_LIBRARY_PATH (new `env` key on profiles).
+- Left 4 Dead 2 rejects a Linux-only install; needs platforms ["windows","linux"] in order.
+- Unturned `+LanServer` hid it from outside the house; now `+InternetServer`.
+- Conan Exiles had linux=None and no runner, so it could never start. (Caught by my test,
+  lost when I took their profiles.py wholesale, re-applied.)
+
+NEW KNOBS: STEAMCMD_LOGIN (Arma 3 / DayZ / Killing Floor refuse anonymous), WINESERVER_PATH
+(Ubuntu keeps wineserver off PATH), XVFB_RUN (wine-hosted Unity servers want a display even
+with -nographics). Profile keys added: login, platforms, cwd, env, rcon_proto.
+
+MERGE NOTES: took their profiles.py wholesale and re-layered my `configs` support on top.
+Their key is `login`, not my `needs_steam_login`; the accessor now reads theirs. Dropped the
+config templates for The Forest and Sons Of The Forest — their verified launch args already
+carry name/password/players, so a config file would be a second source of truth. 7 games get
+configs now, not 9. 260 tests passing.
+
+### Process lesson
+I rebased and force-pushed a branch the user already had checked out, which orphaned their
+commit and caused a painful divergence. Do not rebase a shared branch. Also: `git add -A` on
+their box swept a private SSH key and a Mongo dump into a commit; caught before push and
+amended out, and .gitignore now covers selfhost/keys/, selfhost/backups/, id_ed25519*,
+*.archive.gz.

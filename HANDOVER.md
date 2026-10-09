@@ -1,6 +1,6 @@
 # Handover — Game Server Installs + Discord Control Bot
 
-**Status:** code complete and pushed, 241 tests passing. Nothing has been
+**Status:** code complete and pushed, 260 tests passing. Nothing has been
 installed or run on real hardware yet. This document takes it from there.
 
 **Branch:** `claude/steam-dedicated-server-scan-m0g73g`
@@ -40,7 +40,7 @@ Run the tests any time to confirm nothing is broken:
 
 ```bash
 cd backend && python3 -m pytest tests/ -q --ignore=tests/test_webminpulse.py
-# expect: 241 passed
+# expect: 260 passed
 ```
 
 (`tests/test_webminpulse.py` is pre-existing and fails on a hardcoded
@@ -217,9 +217,16 @@ done
 | 3792580 | SCUM | 0.1 GB | |
 | 556450 | The Forest | 0.1 GB | |
 
-⚠ **Arma 3 (233780) and DayZ (223350) reject anonymous login.** Use
-`+login <your_steam_account>` for those two and complete the Steam Guard prompt
-once; the session is then cached for that user.
+⚠ **Arma 3 (233780), DayZ (223350) and Killing Floor (215350) reject anonymous
+login.** Set `STEAMCMD_LOGIN` to a Steam account that owns the game, then log in
+once by hand so SteamCMD caches the session:
+
+```bash
+sudo -u steam steamcmd +login <your_steam_account> +quit   # Steam Guard once
+```
+
+`/install` then reuses the cached session without a password. Profiles needing
+this carry `"login": True`.
 
 ### 4.4 Bundled servers — Factorio and Terraria
 
@@ -268,6 +275,22 @@ Space Engineers additionally needs `winetricks dotnet48` in its prefix
 
 **Expect to adjust `PROTON_PATH` on first run** — these paths were never
 verified against a real install.
+
+**More games need a compatibility layer than first appeared.** Verified
+Windows-only: ARK: Survival Ascended and SCUM (Proton), plus V Rising, Icarus,
+The Forest, Sons Of The Forest, Killing Floor, Conan Exiles and Space Engineers
+(Wine). Install the prerequisites before any of those:
+
+```bash
+sudo apt install -y wine64 xvfb
+# Ubuntu hides wineserver off PATH; point WINESERVER_PATH at it:
+ls /usr/lib/x86_64-linux-gnu/wine/wineserver
+```
+
+Wine-hosted Unity servers want a display even with `-nographics`, which is what
+`XVFB_RUN` is for. Proton servers run in their own session outside the process
+group, so stopping them goes through `wineserver -k` rather than a signal to the
+group — that is handled, but it is why `WINESERVER_PATH` has to be right.
 
 **RAM is the real constraint, not disk.** ARK: Survival Ascended wants 12–16 GB
 for a single map, plus Proton overhead. On a 16 GB box it runs alone. Check
@@ -354,7 +377,7 @@ curl -X POST http://localhost:8001/api/gameservers \
 needs `launch_cmd` set by hand. Factorio and Terraria are the exceptions —
 they're bundled, see §4.4.
 
-**Nine of them also get a starter config written on first install**, rendered
+**Seven of them also get a starter config written on first install**, rendered
 from `backend/gameconfigs/<appid>/` with the server's name, port, player count
 and passwords filled in:
 
@@ -366,19 +389,18 @@ and passwords filled in:
 | Euro Truck Simulator 2 | `server_config.sii` |
 | Insurgency | `insurgency/cfg/server.cfg` |
 | Left 4 Dead | `left4dead/cfg/server.cfg` |
-| Sons Of The Forest | `userdata/dedicatedserver.cfg` |
 | Squad | `SquadGame/ServerConfig/Server.cfg`, `Admins.cfg` |
-| The Forest | `config.cfg` |
 
 An existing config is **never overwritten** — reinstalling won't undo your
-tuning. Killing Floor and SCUM are deliberately excluded: both ship or generate
-their own configs, and replacing those loses defaults the game expects.
+tuning. Killing Floor and SCUM ship or generate their own. The Forest and Sons
+Of The Forest are excluded too: their verified launch args already carry name,
+password and player count, so a config file would be a second source of truth.
 
-### ⚠ Verify the binary paths after installing
+### Verifying binary paths
 
-Profile binary paths for the eleven added on 2026-10-09 come from each game's
-**documentation, not a verified install**. Vendors move binaries. Run this once
-the installs finish:
+Most profiles are now **verified against real installs on the gameserver**
+(2026-09-26). Still unverified, because the download needs an owning Steam
+account: **Arma 3, DayZ, Killing Floor**. Run this after installing those:
 
 ```bash
 cd /opt/server-monitor-app/backend
@@ -476,7 +498,7 @@ rely on the engine's own save-on-exit. RCON save needs a password on the record.
 - [ ] `/stop valheim-main` as a non-starter → refused
 - [ ] `/stop valheim-main` as the starter → stops, world saved
 - [ ] `python3 -m steam.verify_profiles` exits 0
-- [ ] `backend/tests` still 241 passing
+- [ ] `backend/tests` still 260 passing
 
 ---
 
