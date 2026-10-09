@@ -27,10 +27,12 @@ PROFILES = {
     258550: {  # Rust
         "game": "Rust", "port": 28015, "players": 50,
         "linux": "RustDedicated", "windows": "RustDedicated.exe",
-        # Query port pinned explicitly: Rust's default has moved between releases.
-        "args": ("-batchmode +server.port {port} +server.queryport 28017 "
-                 "+server.hostname \"{name}\" +server.maxplayers {players}"),
-        "query_port": 28017,
+        # Query port stated explicitly because Rust's default has moved between
+        # releases, but derived from this server's port so two Rust servers
+        # don't answer for each other.
+        "args": ("-batchmode +server.port {port} +server.queryport {query_port} "
+                 "+server.hostname {name} +server.maxplayers {players}"),
+        "query_port_offset": 2,
     },
     294420: {  # 7 Days to Die
         "game": "7 Days to Die", "port": 26900, "players": 8,
@@ -52,7 +54,7 @@ PROFILES = {
     1829350: {  # V Rising - Windows-only server, no Linux build
         "game": "V Rising", "port": 9876, "players": 10,
         "linux": None, "windows": "VRisingServer.exe",
-        "args": "-persistentDataPath ./save-data -serverName \"{name}\" -gamePort {port}",
+        "args": "-persistentDataPath ./save-data -serverName {name} -gamePort {port}",
         "query_port_offset": 1, "runner": "wine",
     },
     1690800: {  # Satisfactory
@@ -65,8 +67,8 @@ PROFILES = {
         "game": "ARK: Survival Evolved", "port": 7777, "players": 20,
         "linux": "ShooterGame/Binaries/Linux/ShooterGameServer",
         "windows": "ShooterGame/Binaries/Win64/ShooterGameServer.exe",
-        "args": ("TheIsland?listen?SessionName=\"{name}\"?Port={port}?MaxPlayers={players}"
-                 "?RCONEnabled=True?RCONPort=27020?ServerAdminPassword={password}"),
+        "args": ("TheIsland?listen?SessionName={name}?Port={port}?MaxPlayers={players}"
+                 "?RCONEnabled=True?RCONPort={rcon_port}?ServerAdminPassword={password}"),
         "query_port": 27015, "rcon_port": 27020, "save_cmd": "saveworld",
     },
     2278520: {  # Enshrouded
@@ -145,14 +147,14 @@ PROFILES = {
         # binary runs (verified, answers A2S) once the prefix is set to win10.
         "game": "ICARUS", "port": 17777, "players": 8,
         "linux": None, "windows": "Icarus/Binaries/Win64/IcarusServer-Win64-Shipping.exe",
-        "args": "-Log -PORT={port} -QueryPort=27015 -SteamServerName=\"{name}\"",
+        "args": "-Log -PORT={port} -QueryPort={query_port} -SteamServerName={name}",
         "query_port": 27015, "runner": "wine",
     },
     2430930: {  # ARK: Survival Ascended
         "game": "ARK: Survival Ascended", "port": 7777, "players": 20,
         "linux": None, "windows": "ShooterGame/Binaries/Win64/ArkAscendedServer.exe",
-        "args": ("TheIsland_WP?listen?SessionName=\"{name}\"?Port={port}"
-                 "?RCONEnabled=True?RCONPort=27020?ServerAdminPassword={password}"),
+        "args": ("TheIsland_WP?listen?SessionName={name}?Port={port}"
+                 "?RCONEnabled=True?RCONPort={rcon_port}?ServerAdminPassword={password}"),
         "query_port": 27015, "rcon_port": 27020, "save_cmd": "saveworld", "runner": "proton",
     },
 
@@ -185,19 +187,22 @@ PROFILES = {
         "linux": "bin/dontstarve_dedicated_server_nullrenderer", "windows": None,
         "args": "-console -cluster {name} -shard Master",
         "cwd": "bin", "query_port": 27016,
-        "configs": ["cluster/cluster.ini", "cluster/Master/server.ini"],
+        # No `configs`: DST reads its cluster from the persistent data dir
+        # (~/.klei/DoNotStarveTogether/<cluster>/), not the install dir, so a
+        # templated file here would be silently ignored. See HANDOVER.md.
     },
     1948160: {  # Euro Truck Simulator 2 - needs server_packages exported from the game
         "game": "Euro Truck Simulator 2", "port": 27015, "players": 8,
         "linux": "bin/linux_x64/server_launch.sh", "windows": None,
         "args": "", "cwd": "bin/linux_x64", "query_port": 27016,
-        "configs": ["server_config.sii"],
+        # No `configs`: ETS2 reads server_config.sii from its user data dir and
+        # the launcher takes no path override, so writing it here does nothing.
     },
     556450: {  # The Forest - Windows-only server
         "game": "The Forest", "port": 27015, "players": 8,
         "linux": None, "windows": "TheForestDedicatedServer.exe",
         "args": ("-batchmode -nographics -serverip 0.0.0.0 -servergameport {port} "
-                 "-serverqueryport 27016 -serversteamport 8766 -servername \"{name}\" "
+                 "-serverqueryport 27016 -serversteamport 8766 -servername {name} "
                  "-serverplayers {players} -serverpassword {password} -inittype Continue -slot 1"),
         "query_port": 27016, "runner": "wine",
     },
@@ -207,7 +212,7 @@ PROFILES = {
         "args": ("-batchmode -nographics -userdatapath ./userdata "
                  "-dedicatedserver.IpAddress 0.0.0.0 -dedicatedserver.GamePort {port} "
                  "-dedicatedserver.QueryPort 27016 -dedicatedserver.BlobSyncPort 9700 "
-                 "-dedicatedserver.ServerName \"{name}\" -dedicatedserver.MaxPlayers {players} "
+                 "-dedicatedserver.ServerName {name} -dedicatedserver.MaxPlayers {players} "
                  "-dedicatedserver.Password {password}"),
         "query_port": 27016, "runner": "wine",
     },
@@ -252,6 +257,10 @@ def query_port(rec: dict):
     the game port itself. A profile may override with an explicit query_port.
     """
     prof = get(rec.get("server_appid")) or {}
+    # An explicit per-record value wins: two servers of the same game must be
+    # able to use different query ports.
+    if rec.get("query_port"):
+        return int(rec["query_port"])
     port = rec.get("port") or prof.get("port")
     if not port:
         return None

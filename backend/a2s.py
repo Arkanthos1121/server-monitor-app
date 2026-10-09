@@ -12,6 +12,7 @@ mistaken for an empty server, or the reaper would kill an occupied one.
 from __future__ import annotations
 
 import asyncio
+import socket
 import struct
 from typing import Optional
 
@@ -89,12 +90,22 @@ async def _exchange(host: str, port: int, payload: bytes, timeout: float) -> byt
     # from whichever address faces us - from a Docker container that is the
     # bridge IP, not the LAN IP we sent to - and a connected socket silently
     # drops those replies.
+    #
+    # The address is resolved here rather than left to sendto(), which would do
+    # a blocking lookup on the event loop every poll, and binds to whichever
+    # family the host actually has instead of assuming IPv4.
     loop = asyncio.get_running_loop()
+    infos = await loop.getaddrinfo(host, port, type=socket.SOCK_DGRAM)
+    if not infos:
+        raise OSError(f"cannot resolve {host}")
+    family, _type, _proto, _canon, sockaddr = infos[0]
+    any_addr = "::" if family == socket.AF_INET6 else "0.0.0.0"
+
     fut = loop.create_future()
     transport, _ = await loop.create_datagram_endpoint(
-        lambda: _Protocol(fut), local_addr=("0.0.0.0", 0))
+        lambda: _Protocol(fut), local_addr=(any_addr, 0), family=family)
     try:
-        transport.sendto(payload, (host, port))
+        transport.sendto(payload, sockaddr)
         return await asyncio.wait_for(fut, timeout)
     finally:
         transport.close()

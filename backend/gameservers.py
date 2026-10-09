@@ -256,10 +256,21 @@ def build_launch(rec: dict) -> Optional[str]:
         return None
 
     d = install_dir(rec)
+    # Every substituted value is shell-quoted: this string is handed to
+    # `bash -lc` (or ssh), so an unquoted server name or password would be a
+    # command injection running as the backend/SSH user. Templates must NOT
+    # wrap placeholders in their own quotes - shlex.quote does it, and adjacent
+    # quoting concatenates, so SessionName={name}?Port=... stays one token.
     args = prof["args"].format(
-        dir=d, name=rec.get("name", "server"), port=rec.get("port") or prof["port"],
-        password=rec.get("server_password") or "changeme",
-        players=rec.get("max_players") or prof["players"],
+        dir=shlex.quote(str(d)),
+        name=shlex.quote(str(rec.get("name", "server"))),
+        port=int(rec.get("port") or prof["port"]),
+        # Derived per record, not hardcoded: two servers of the same game would
+        # otherwise share a query/RCON port and answer for each other.
+        query_port=int(profiles.query_port(rec) or 0),
+        rcon_port=int(rec.get("rcon_port") or prof.get("rcon_port") or 0),
+        password=shlex.quote(str(rec.get("server_password") or "")),
+        players=int(rec.get("max_players") or prof["players"]),
     )
     exe = shlex.quote(str(d / binary))
 
@@ -519,12 +530,22 @@ async def stop_prefix(rec: dict, grace: int) -> Optional[str]:
     else:
         prefix = d / "wineprefix"
         ws = shlex.quote(WINESERVER_PATH)
+    # wineserver takes the signal glued to the flag (-k15), not as a separate
+    # argument: `-k 15` sends the default signal and passes 15 as a stray arg,
+    # so the intended SIGTERM-then-SIGKILL never happens.
     cmd = (f"export WINEPREFIX={shlex.quote(str(prefix))}; "
-           f"{ws} -k 15 2>/dev/null; "
-           f"if timeout {int(grace)} {ws} -w 2>/dev/null; then echo CLEAN; "
-           f"else {ws} -k 9 2>/dev/null; echo KILLED; fi")
-    _code, out = await run_shell(cmd, timeout=int(grace) + 30)
-    return "prefix stopped cleanly" if "CLEAN" in out else "prefix force-killed"
+           f"command -v {ws} >/dev/null 2>&1 || {{ echo NOWINESERVER; exit 3; }}; "
+           f"{ws} -k15 2>&1; "
+           f"if timeout {int(grace)} {ws} -w 2>&1; then echo CLEAN; "
+           f"else {ws} -k9 2>&1; echo KILLED; fi")
+    code, out = await run_shell(cmd, timeout=int(grace) + 30)
+    if code == 3 or "NOWINESERVER" in out:
+        return f"wineserver not found at '{ws}' - set WINESERVER_PATH"
+    if "CLEAN" in out:
+        return "prefix stopped cleanly"
+    if "KILLED" in out:
+        return "prefix force-killed"
+    return f"prefix stop uncertain: {out.strip()[:120] or 'no output'}"
 
 
 async def save_world(rec: dict) -> tuple[bool, str]:
@@ -592,7 +613,8 @@ async def write_configs(rec: dict) -> list[str]:
     if not appid or not wanted:
         return []
     d = install_dir(rec)
-    written = []
+    written: list[str] = []
+    failed: list[str] = []
     for rel in wanted:
         body = render_config(int(appid), rel, rec)
         if body is None:
@@ -608,4 +630,8 @@ async def write_configs(rec: dict) -> list[str]:
         code, out = await run_shell(cmd, timeout=60)
         if code == 0 and "WROTE" in out:
             written.append(rel)
+        elif code != 0:
+            failed.append(f"{rel} ({out.strip()[:80] or 'exit ' + str(code)})")
+    if failed:
+        logger.warning(f"config write failed for {rec.get('name')}: {failed}")
     return written

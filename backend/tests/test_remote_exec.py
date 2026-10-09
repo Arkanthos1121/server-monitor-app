@@ -219,10 +219,27 @@ async def test_proton_stop_reaches_the_whole_prefix(as_remote, captured):
     assert await gs.stop_prefix({"name": "scum", "server_appid": 3792580}, 5) == "prefix stopped cleanly"
     cmd = calls[0][-1]
     assert "scum-3792580/compatdata/pfx" in cmd
-    assert cmd.index("-k 15") < cmd.index("-w") < cmd.index("-k 9")
+    # Signal glued to the flag: `-k 15` would send the default signal and pass
+    # 15 as a stray argument, so SIGTERM-then-SIGKILL never actually happens.
+    assert cmd.index("-k15") < cmd.index("-w") < cmd.index("-k9")
 
 
 async def test_native_stop_skips_the_prefix_step(as_remote, captured):
     calls, _rc = captured
     assert await gs.stop_prefix({"name": "v", "server_appid": 896660}, 5) is None
     assert calls == []
+
+
+async def test_prefix_stop_reports_a_missing_wineserver(as_remote, captured):
+    """A wrong WINESERVER_PATH must not read as a successful stop."""
+    _calls, rc = captured
+    rc["rc"], rc["out"] = 3, b"NOWINESERVER\n"
+    out = await gs.stop_prefix({"name": "scum", "server_appid": 3792580}, 5)
+    assert "wineserver not found" in out
+
+
+async def test_prefix_stop_reports_an_uncertain_result(as_remote, captured):
+    _calls, rc = captured
+    rc["out"] = b""
+    out = await gs.stop_prefix({"name": "scum", "server_appid": 3792580}, 5)
+    assert "uncertain" in out

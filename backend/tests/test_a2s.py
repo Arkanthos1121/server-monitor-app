@@ -126,3 +126,16 @@ async def test_garbage_response_returns_none():
         assert await a2s.player_count("127.0.0.1", port, timeout=1.0) is None
     finally:
         transport.close()
+
+
+async def test_resolves_hostnames_not_just_literal_ips():
+    """sendto() would do a blocking lookup on the event loop; resolution is ours."""
+    transport, _proto, port = await serve(make_info(players=4))
+    try:
+        assert await a2s.player_count("localhost", port, timeout=2.0) == 4
+    finally:
+        transport.close()
+
+
+async def test_unresolvable_host_returns_none_not_an_exception():
+    assert await a2s.player_count("no-such-host.invalid", 27015, timeout=2.0) is None

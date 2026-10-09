@@ -85,7 +85,7 @@ async def execute(host: str, port: int, password: str, command: str,
 
 async def telnet_execute(host: str, port: int, password: str, command: str,
                          done_marker: str = "World saved",
-                         timeout: float = 30.0) -> str:
+                         timeout: float = 60.0) -> str:
     """7 Days to Die's console is line-based telnet, not Source RCON.
 
     It asks for a password, confirms the logon, then echoes log lines; the
@@ -97,10 +97,18 @@ async def telnet_execute(host: str, port: int, password: str, command: str,
     except (OSError, asyncio.TimeoutError) as e:
         raise RconError(f"cannot reach telnet console at {host}:{port} ({e})") from e
 
+    # One deadline for the whole exchange. A per-read timeout would be reset by
+    # every log line, and 7DTD's console is chatty, so a server that never
+    # answers would hang the stop forever instead of giving up.
+    deadline = asyncio.get_running_loop().time() + timeout
+
     async def until(marker: str) -> str:
         seen = b""
         while marker.lower().encode() not in seen.lower():
-            chunk = await asyncio.wait_for(reader.read(4096), timeout)
+            left = deadline - asyncio.get_running_loop().time()
+            if left <= 0:
+                raise asyncio.TimeoutError()
+            chunk = await asyncio.wait_for(reader.read(4096), left)
             if not chunk:
                 raise RconError("console closed the connection")
             seen += chunk
@@ -120,6 +128,8 @@ async def telnet_execute(host: str, port: int, password: str, command: str,
         return f"'{command}' acknowledged"
     except asyncio.TimeoutError as e:
         raise RconError(f"no '{done_marker}' within {timeout:.0f}s") from e
+    except ConnectionError as e:
+        raise RconError(f"telnet console dropped the connection ({e})") from e
     finally:
         writer.close()
         try:
@@ -135,7 +145,8 @@ async def save_world(host: str, port: int, password: str, command: str,
     it just has to be reported honestly."""
     try:
         if proto == "telnet":
-            return True, await telnet_execute(host, port, password, command)
+            return True, await telnet_execute(host, port, password, command,
+                                              timeout=timeout)
         reply = await execute(host, port, password, command, timeout)
         return True, (reply.strip() or f"'{command}' acknowledged")
     except RconError as e:

@@ -1,6 +1,6 @@
 # Handover — Game Server Installs + Discord Control Bot
 
-**Status:** code complete and pushed, 260 tests passing. Nothing has been
+**Status:** code complete and pushed, 274 tests passing. Nothing has been
 installed or run on real hardware yet. This document takes it from there.
 
 **Branch:** `claude/steam-dedicated-server-scan-m0g73g`
@@ -40,7 +40,7 @@ Run the tests any time to confirm nothing is broken:
 
 ```bash
 cd backend && python3 -m pytest tests/ -q --ignore=tests/test_webminpulse.py
-# expect: 260 passed
+# expect: 274 passed
 ```
 
 (`tests/test_webminpulse.py` is pre-existing and fails on a hardcoded
@@ -377,7 +377,7 @@ curl -X POST http://localhost:8001/api/gameservers \
 needs `launch_cmd` set by hand. Factorio and Terraria are the exceptions —
 they're bundled, see §4.4.
 
-**Seven of them also get a starter config written on first install**, rendered
+**Five of them also get a starter config written on first install**, rendered
 from `backend/gameconfigs/<appid>/` with the server's name, port, player count
 and passwords filled in:
 
@@ -385,14 +385,30 @@ and passwords filled in:
 |---|---|
 | Arma 3 | `server.cfg` |
 | DayZ | `serverDZ.cfg` |
-| Don't Starve Together | `cluster/cluster.ini`, `cluster/Master/server.ini` |
-| Euro Truck Simulator 2 | `server_config.sii` |
 | Insurgency | `insurgency/cfg/server.cfg` |
 | Left 4 Dead | `left4dead/cfg/server.cfg` |
 | Squad | `SquadGame/ServerConfig/Server.cfg`, `Admins.cfg` |
 
 An existing config is **never overwritten** — reinstalling won't undo your
-tuning. Killing Floor and SCUM ship or generate their own. The Forest and Sons
+tuning.
+
+### Three games need configuration done by hand
+
+The generator deliberately does **not** write these, because the server reads
+them from somewhere the installer can't reach:
+
+- **Don't Starve Together** reads its cluster from
+  `~/.klei/DoNotStarveTogether/<cluster>/` (persistent data dir), not the
+  install dir, and needs a Klei cluster token from
+  <https://accounts.klei.com/account/game/servers>. Create `cluster.ini` and
+  `Master/server.ini` there, matching the `-cluster` name in the profile args.
+- **Euro Truck Simulator 2** reads `server_config.sii` from its user data dir
+  and the launcher takes no path override. It also needs `server_packages.*`
+  exported from the game client (`export_server_packages` in the console).
+- **7 Days to Die** keeps its console settings in `serverconfig.xml`. The
+  profile talks telnet on **8091**, so set `TelnetPort` to 8091 and give
+  `TelnetPassword` a value — the shipped default is empty, which disables
+  remote logins and makes save-before-stop fail silently. Killing Floor and SCUM ship or generate their own. The Forest and Sons
 Of The Forest are excluded too: their verified launch args already carry name,
 password and player count, so a config file would be a second source of truth.
 
@@ -498,7 +514,7 @@ rely on the engine's own save-on-exit. RCON save needs a password on the record.
 - [ ] `/stop valheim-main` as a non-starter → refused
 - [ ] `/stop valheim-main` as the starter → stops, world saved
 - [ ] `python3 -m steam.verify_profiles` exits 0
-- [ ] `backend/tests` still 260 passing
+- [ ] `backend/tests` still 274 passing
 
 ---
 

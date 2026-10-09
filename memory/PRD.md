@@ -299,3 +299,42 @@ commit and caused a painful divergence. Do not rebase a shared branch. Also: `gi
 their box swept a private SSH key and a Mongo dump into a commit; caught before push and
 amended out, and .gitignore now covers selfhost/keys/, selfhost/backups/, id_ed25519*,
 *.archive.gz.
+
+## Full Bug Sweep (2026-10-09, session 10 cont.)
+Ran /code-review high over origin/main..HEAD. 10 findings; verified each by hand before fixing.
+
+SECURITY (verified by proof-of-concept, then fixed):
+- COMMAND INJECTION in build_launch: `{name}` and `{password}` were spliced unquoted into a
+  string handed to `bash -lc` / ssh. A server password of `p; touch /tmp/X; #` executed as the
+  backend/SSH user. Now every substituted value goes through shlex.quote and ports/players are
+  coerced to int. This required removing the manual `\"` around `{name}` in 7 profile templates
+  — adjacent shell quoting concatenates, so `SessionName={name}?Port=...` stays one token.
+  Regression tests cover quote, semicolon, $(), backtick and newline payloads.
+
+HANGS / CORRECTNESS:
+- rcon.telnet_execute used a PER-READ timeout, so a chatty 7DTD console reset the window
+  forever and save_then_stop had no outer bound: one bad server would stall reap() for all of
+  them. Now a single overall deadline, and save_world forwards its timeout.
+- stop_prefix used `wineserver -k 15`; wineserver wants the signal GLUED (`-k15`), so SIGTERM
+  was never sent and the SIGTERM->grace->SIGKILL sequence never ran. Also now detects a missing
+  wineserver instead of reporting "force-killed". NOTE: the existing test asserted `-k 15`,
+  i.e. it encoded the bug.
+- a2s: dropping remote_addr moved DNS into sendto() (blocking the event loop every poll when
+  GAMESERVER_SSH_HOST is a name) and pinned AF_INET. Now resolves via loop.getaddrinfo and
+  follows the returned family, so IPv6-only hosts work.
+- write_configs swallowed non-zero exits, so a failed write still reported "installed and
+  ready to start". Now logged.
+
+PORT COLLISIONS (two instances of one game answered for each other):
+- Rust query port was pinned to 28017; now derived (offset 2). Icarus QueryPort likewise.
+- ARK SE and ASA both hardcoded RCONPort=27020, so saveworld went to whichever bound first.
+  New `{rcon_port}` and `{query_port}` placeholders resolve from the record, and
+  profiles.query_port() now honours an explicit rec["query_port"].
+
+CONFIGS THAT WERE NEVER READ (removed rather than shipped as no-ops):
+- DST writes to ~/.klei/..., not the install dir, and needs a Klei token.
+- ETS2 reads server_config.sii from its user data dir with no path override.
+- Both now documented as manual steps in HANDOVER.md, along with 7DTD needing TelnetPort 8091
+  and a non-empty TelnetPassword in serverconfig.xml.
+
+274 tests passing. 5 games get generated configs now, not 9.
