@@ -15,8 +15,14 @@ import sys
 OK, BAD, WARN, INFO = "  [ok]", "  [PROBLEM]", "  [warn]", "       "
 
 
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
+
 def head(title: str):
-    print(f"\n{title}\n" + "-" * len(title))
+    print(f"\n{title}\n" + "-" * len(title), flush=True)
 
 
 async def main() -> int:
@@ -63,45 +69,67 @@ async def main() -> int:
     tree = app_commands.CommandTree(client)
     result: dict = {}
 
-    @client.event
-    async def on_ready():
-        try:
-            result["user"] = str(client.user)
-            result["app_id"] = client.application_id
-            result["guilds"] = [(g.name, g.id, g.me.guild_permissions.value if g.me else 0)
-                                for g in client.guilds]
-            cmds = {}
-            for g in client.guilds:
-                try:
-                    cmds[g.id] = [c.name for c in await tree.fetch_commands(guild=g)]
-                except Exception as e:  # noqa: BLE001
-                    cmds[g.id] = f"could not read: {e}"
+    async def inspect():
+        """Gather everything once the gateway is ready."""
+        result["user"] = str(client.user)
+        result["app_id"] = client.application_id
+        result["guilds"] = [(g.name, g.id, g.me.guild_permissions.value if g.me else 0)
+                            for g in client.guilds]
+        cmds = {}
+        for g in client.guilds:
             try:
-                cmds["global"] = [c.name for c in await tree.fetch_commands()]
+                cmds[g.id] = [c.name for c in await tree.fetch_commands(guild=g)]
             except Exception as e:  # noqa: BLE001
-                cmds["global"] = f"could not read: {e}"
-            result["commands"] = cmds
-        except Exception as e:  # noqa: BLE001
-            result["error"] = e
-        finally:
-            await client.close()
-
-    try:
-        await client.start(token)
-    except Exception as e:  # noqa: BLE001
-        # Close the session explicitly or aiohttp prints "Unclosed connector"
-        # noise over the diagnosis we just produced.
+                cmds[g.id] = f"could not read: {e}"
         try:
-            await client.close()
-        except Exception:
-            pass
+            cmds["global"] = [c.name for c in await tree.fetch_commands()]
+        except Exception as e:  # noqa: BLE001
+            cmds["global"] = f"could not read: {e}"
+        result["commands"] = cmds
+
+    print(f"{INFO} connecting (30s timeout)...", flush=True)
+    login_task = asyncio.create_task(client.start(token))
+    try:
+        # Whichever finishes first: the gateway becomes ready, or start() blows
+        # up with a login error. Waiting only on wait_until_ready() would hang
+        # forever on a bad token.
+        ready = asyncio.create_task(client.wait_until_ready())
+        done, _pending = await asyncio.wait(
+            {ready, login_task}, timeout=30, return_when=asyncio.FIRST_COMPLETED)
+
+        if login_task in done:
+            login_task.result()                      # re-raises the real error
+            raise RuntimeError("the client disconnected before becoming ready")
+        if ready not in done:
+            raise TimeoutError("timed out waiting for the Discord gateway")
+
+        await inspect()
+    except BaseException as e:   # noqa: BLE001 - CancelledError is not Exception
         name = type(e).__name__
-        print(f"{BAD} Login failed ({name}): {e}")
+        print(f"{BAD} Login failed ({name}): {e}", flush=True)
         if "LoginFailure" in name or "Unauthorized" in name:
             print(f"{INFO} The token was rejected. Regenerate it at")
             print(f"{INFO} discord.com/developers > your app > Bot > Reset Token.")
             print(f"{INFO} Copy the BOT token - not the Client Secret, not the App ID.")
+        elif "Timeout" in name:
+            print(f"{INFO} Connected to nothing within 30s. Check the container has")
+            print(f"{INFO} outbound internet: docker compose exec backend "
+                  f"python3 -c \"import socket;print(socket.gethostbyname('discord.com'))\"")
+        elif "PrivilegedIntents" in name:
+            print(f"{INFO} Enable the intents under Bot > Privileged Gateway Intents,")
+            print(f"{INFO} or leave them off - this bot needs none.")
         return 1
+    finally:
+        try:
+            await client.close()
+        except Exception:
+            pass
+        if not login_task.done():
+            login_task.cancel()
+        try:
+            await login_task
+        except BaseException:
+            pass
 
     if result.get("error"):
         print(f"{BAD} Connected but failed while inspecting: {result['error']}")
