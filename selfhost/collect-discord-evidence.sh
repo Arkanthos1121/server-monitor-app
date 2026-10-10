@@ -3,31 +3,39 @@
 #
 #   cd /opt/server-monitor-app/selfhost && bash collect-discord-evidence.sh
 #
-# Prints the path at the end. Secrets are reported as set/empty and by length
-# only - no value from .env is ever written to the report.
+# Everything is printed live AND saved, so you can always see which step it is
+# on. Every step has a timeout - the whole run cannot exceed about four
+# minutes. Ctrl+C at any point is safe.
+#
+# Secrets are reported as set/empty and by length only; no value from .env is
+# ever written to the report.
 set -uo pipefail
 
 OUT="${TMPDIR:-/tmp}/discord-evidence-$(date +%Y%m%d-%H%M%S).txt"
 cd "$(dirname "$0")" || exit 1
 
-# docker compose v2 (plugin) or the old v1 binary.
 if docker compose version >/dev/null 2>&1; then DC=(docker compose)
 elif command -v docker-compose >/dev/null 2>&1; then DC=(docker-compose)
 else echo "docker compose not found - is Docker installed?" >&2; exit 1; fi
 
+# Every docker call gets a ceiling and a closed stdin. `exec` attaches stdin by
+# default, which can leave it waiting on a terminal that will never send
+# anything - the difference between a four-minute run and an overnight one.
+dc() { local t="$1"; shift; timeout "$t" "${DC[@]}" "$@" </dev/null 2>&1; }
+
 section() { printf '\n===== %s =====\n' "$1"; }
 
-{
+body() {
   echo "collected $(date -Is) on $(hostname)"
   echo "compose: ${DC[*]}"
 
   section "containers"
-  "${DC[@]}" ps 2>&1
+  dc 30 ps
 
   section "which variables are set (names and lengths only, no values)"
   # Read from the running container so this reflects what the app actually got,
   # not what .env says. A var set in .env but not passed through shows as empty.
-  "${DC[@]}" exec -T backend python3 -c '
+  dc 60 exec -T backend python3 -c '
 import os
 for k in ("DISCORD_BOT_TOKEN","DISCORD_GUILD_ID","DISCORD_CHANNEL_ID",
           "DISCORD_OWNER_EMAIL","DISCORD_ADMIN_ROLE","JWT_SECRET",
@@ -40,7 +48,7 @@ for k in ("DISCORD_BOT_TOKEN","DISCORD_GUILD_ID","DISCORD_CHANNEL_ID",
         print(f"{k:22} {v}")            # ids and emails are not secrets
     else:
         print(f"{k:22} set ({len(v)} chars, ends ...{v[-4:]})")
-' 2>&1
+'
 
   section ".env keys present on disk (names only)"
   if [ -f .env ]; then
@@ -52,19 +60,23 @@ for k in ("DISCORD_BOT_TOKEN","DISCORD_GUILD_ID","DISCORD_CHANNEL_ID",
   fi
 
   section "backend log, discord lines only"
-  "${DC[@]}" logs backend --tail 400 2>&1 | grep -i discord || echo "(no discord lines in the last 400 - the bot never started)"
+  dc 60 logs backend --tail 400 | grep -i discord \
+    || echo "(no discord lines in the last 400 - the bot never started)"
 
-  section "backend log, errors"
-  "${DC[@]}" logs backend --tail 200 2>&1 | grep -iE 'error|traceback|exception' | tail -40 || echo "(none)"
+  section "backend log, last 40 lines verbatim"
+  dc 60 logs backend --tail 40
 
   section "diagnose_discord.py"
-  timeout 180 "${DC[@]}" exec -T backend python3 diagnose_discord.py 2>&1
-  echo "(diagnostic exit: $?)"
-} > "$OUT" 2>&1
+  dc 180 exec -T backend python3 diagnose_discord.py
+  echo "(diagnostic finished or timed out at 180s)"
+
+  section "done"
+}
+
+echo "Writing to $OUT - this prints as it goes and takes up to ~4 minutes."
+body 2>&1 | tee "$OUT"
 
 echo
-echo "Report written to: $OUT"
-echo "Paste its contents back. It contains no passwords or tokens."
-echo
-echo "----- first 40 lines -----"
-head -40 "$OUT"
+echo "================================================================"
+echo "Report saved to: $OUT"
+echo "Paste it back. It contains no passwords or tokens."
