@@ -23,7 +23,7 @@ Push this project to GitHub (Emergent → "Save to GitHub"), then on the Pi:
 ```bash
 git clone <your-repo-url> webminpulse
 cd webminpulse/selfhost
-cp .env.example .env
+cp -n .env.example .env     # -n = never overwrite an existing .env
 # fill in secrets:
 openssl rand -hex 32                                              # -> JWT_SECRET
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # -> SERVER_ENC_KEY

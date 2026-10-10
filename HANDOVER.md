@@ -314,7 +314,7 @@ sudo git checkout claude/steam-dedicated-server-scan-m0g73g
 
 ```bash
 cd selfhost
-cp .env.example .env
+cp -n .env.example .env     # -n = never overwrite an existing .env
 openssl rand -hex 32                                                        # → JWT_SECRET
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # → SERVER_ENC_KEY
 nano .env

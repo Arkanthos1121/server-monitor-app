@@ -31,7 +31,18 @@ async def main() -> int:
 
     if not token:
         print(f"{BAD} DISCORD_BOT_TOKEN is empty - the bot is disabled entirely.")
-        print(f"{INFO} Set it in selfhost/.env, then: docker compose up -d --build")
+        others = [k for k in ("JWT_SECRET", "SERVER_ENC_KEY", "MONGO_URL")
+                  if not os.environ.get(k, "").strip()]
+        if "JWT_SECRET" in others and "SERVER_ENC_KEY" in others:
+            print(f"{BAD} JWT_SECRET and SERVER_ENC_KEY are ALSO empty.")
+            print(f"{INFO} That pattern means .env was overwritten with .env.example")
+            print(f"{INFO} (`cp .env.example .env` over a live file). Recover the old")
+            print(f"{INFO} values before regenerating - SERVER_ENC_KEY decrypts stored")
+            print(f"{INFO} passwords and a new one cannot read what the old one wrote:")
+            print(f"{INFO}   docker ps -a | grep backend      # an older container?")
+            print(f"{INFO}   docker inspect <id> --format '{{{{range .Config.Env}}}}{{{{println .}}}}{{{{end}}}}'")
+        else:
+            print(f"{INFO} Set it in selfhost/.env, then: docker compose up -d --build")
         return 1
     print(f"{OK} DISCORD_BOT_TOKEN is set ({len(token)} chars, ends ...{token[-4:]})")
     print(f"{OK if guild_id else WARN} DISCORD_GUILD_ID = {guild_id or '(not set)'}")
