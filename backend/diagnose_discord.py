@@ -135,6 +135,23 @@ def report_channels(chans: list, channel_id: str, problems: list) -> None:
 async def main() -> int:
     problems: list[str] = []
 
+    # The image bakes the code in at build time, so `git pull` alone leaves an
+    # old copy running inside the container. Printing when this file was built
+    # makes that visible instead of showing a stale report as a current one.
+    head("0. This script")
+    try:
+        import datetime
+        built = datetime.datetime.fromtimestamp(
+            os.path.getmtime(__file__)).strftime("%Y-%m-%d %H:%M")
+        age_h = (time.time() - os.path.getmtime(__file__)) / 3600
+        mark = OK if age_h < 24 else WARN
+        print(f"{mark} image built {built} ({age_h:.1f}h ago)")
+        if age_h >= 24:
+            print(f"{INFO} After a `git pull` you must rebuild, or this runs the")
+            print(f"{INFO} old copy: docker compose up -d --build")
+    except Exception:
+        pass
+
     head("1. Configuration")
     token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
     guild_id = os.environ.get("DISCORD_GUILD_ID", "").strip()

@@ -25,9 +25,14 @@ Work through this in order. Steps 1–3 take about five minutes.
 
 ```bash
 cd /opt/server-monitor-app && git pull
-cd selfhost && docker compose up -d --build
-docker compose exec backend python3 diagnose_discord.py
+cd selfhost && bash diagnose.sh
 ```
+
+`diagnose.sh` rebuilds first and then runs the diagnosis. The rebuild is not
+optional: the image copies the code in when it is built, so `git pull` on its
+own leaves the previous version running inside the container and you get a
+stale report that looks current. The diagnosis prints its own build time at
+the top for exactly that reason.
 
 It checks your config, proves the container can reach Discord, logs in with
 your real token, and prints which servers the bot can see **with their ids**,
