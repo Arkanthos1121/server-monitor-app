@@ -95,3 +95,7 @@ selfhost/backups/
 *.pre-container-update-*
 id_ed25519*
 *.archive.gz
+
+# .env backups written by selfhost/fix-env-keys.sh - these hold live secrets
+.env.backup-*
+*/.env.backup-*
