@@ -45,7 +45,10 @@ enc="$(getval SERVER_ENC_KEY)"
 if valid_fernet "$enc"; then
   echo "[ok]      SERVER_ENC_KEY is already a valid Fernet key - left alone."
 else
-  echo "[PROBLEM] SERVER_ENC_KEY is ${enc:+invalid (${#enc} chars)}${enc:-empty} - this is what"
+  # NB: ${v:-x} expands to v's VALUE when v is set, not to x. Using it here
+  # printed the secret to the terminal. Describe it; never echo it.
+  if [ -z "$enc" ]; then why="empty"; else why="invalid (${#enc} chars)"; fi
+  echo "[PROBLEM] SERVER_ENC_KEY is $why - this is what"
   echo "          stops the backend booting."
   echo "          Searching older containers for the previous key..."
   found=""
@@ -71,7 +74,8 @@ if [ "${#jwt}" -ge 32 ]; then
   echo "[ok]      JWT_SECRET is set (${#jwt} chars) - left alone."
 else
   setval JWT_SECRET "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-  echo "[ok]      JWT_SECRET was ${jwt:+too short}${jwt:-empty}; generated a new one."
+  if [ -z "$jwt" ]; then why="empty"; else why="too short (${#jwt} chars, need 32+)"; fi
+  echo "[ok]      JWT_SECRET was $why; generated a new one."
   echo "          Everyone signed in to the app will have to log in again."
   changed=1
 fi
