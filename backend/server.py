@@ -31,6 +31,62 @@ load_dotenv(ROOT_DIR / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("webminpulse")
 
+def _check_config() -> None:
+    """Fail with instructions instead of a traceback.
+
+    Every one of these used to surface as a bare KeyError or a cryptography
+    ValueError from module import, which kills uvicorn before the app object
+    exists. The container then restart-loops with a stack trace that names no
+    variable and no fix, and everything downstream - the Discord bot included -
+    looks broken for reasons that have nothing to do with it.
+    """
+    gen_key = ('python3 -c "from cryptography.fernet import Fernet; '
+               'print(Fernet.generate_key().decode())"')
+    problems: list[tuple[str, str]] = []
+
+    for var, how in (("MONGO_URL", "mongodb://mongo:27017"),
+                     ("DB_NAME", "webminpulse"),
+                     ("JWT_SECRET", "openssl rand -hex 32")):
+        if not os.environ.get(var, "").strip():
+            problems.append((f"{var} is empty or unset", f"set it to: {how}"))
+
+    key = os.environ.get("SERVER_ENC_KEY", "").strip()
+    if not key:
+        problems.append(("SERVER_ENC_KEY is empty or unset", f"generate one: {gen_key}"))
+    else:
+        try:
+            Fernet(key.encode())
+        except Exception:
+            problems.append(
+                ("SERVER_ENC_KEY is not a valid Fernet key (it must be 44 "
+                 f"url-safe base64 characters; yours is {len(key)})",
+                 f"generate a new one: {gen_key}"))
+
+    if not problems:
+        return
+
+    bar = "=" * 72
+    lines = ["", bar, "WebminPulse cannot start - selfhost/.env is incomplete.", bar, ""]
+    for what, how in problems:
+        lines += [f"  * {what}", f"      {how}", ""]
+    lines += [
+        "Edit selfhost/.env, then: docker compose up -d --build",
+        "",
+        "If .env was recently overwritten with .env.example, the old",
+        "SERVER_ENC_KEY is what decrypts already-stored passwords. Look for it",
+        "in a previous container before generating a new one:",
+        "  docker ps -a --filter name=backend --format '{{.ID}} {{.CreatedAt}}'",
+        "  docker inspect <id> --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ENC",
+        "A new key is safe to generate - you will just have to re-enter any",
+        "Webmin passwords saved in the app.",
+        bar, "",
+    ]
+    print("\n".join(lines), flush=True)
+    raise SystemExit(1)
+
+
+_check_config()
+
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
