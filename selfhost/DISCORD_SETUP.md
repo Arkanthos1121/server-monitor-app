@@ -29,9 +29,15 @@ cd selfhost && docker compose up -d --build
 docker compose exec backend python3 diagnose_discord.py
 ```
 
-It logs in with your real token and prints which servers the bot can see **with
-their ids**, which commands Discord has registered where, and a verdict naming
-the exact fix. Do what it says; the rest of this file is background.
+It checks your config, proves the container can reach Discord, logs in with
+your real token, and prints which servers the bot can see **with their ids**,
+which commands Discord has registered where, and a verdict naming the exact
+fix. Do what it says; the rest of this file is background.
+
+**Let it finish.** Every wait prints its elapsed seconds (`6s - still waiting
+for Discord`) and gives up on its own after 30 seconds, so a slow step looks
+slow rather than hung. Pressing Ctrl+C just loses the verdict. Worst case it
+takes about a minute.
 
 If you'd rather read the log directly:
 
@@ -192,11 +198,17 @@ Check these in order:
   should show a recent uptime for `wp-backend`.
 - **Is `DISCORD_GUILD_ID` the server, not a channel?** Easy to get backwards.
 
-If all four check out, grab the full log and we'll look at it together:
+If all four check out, collect everything in one go and paste it back:
 
 ```bash
-docker compose logs backend --tail 200 > /tmp/backend.log
+cd /opt/server-monitor-app/selfhost && bash collect-discord-evidence.sh
 ```
+
+That writes a single file with the container status, which variables are set
+(by **name and length only** — no tokens or passwords), the Discord lines from
+the backend log, and the full diagnosis. It prints the path and the first 40
+lines when it finishes. One paste of that file is enough to pin down anything
+this guide doesn't cover.
 
 ---
 

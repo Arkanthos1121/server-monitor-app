@@ -2,18 +2,26 @@
 
     docker compose exec backend python3 diagnose_discord.py
 
-Logs in with your real token, lists the guilds the bot can actually see, asks
-Discord which commands are registered where, and checks the account the bot
-acts as. It changes nothing except registering commands when you pass --fix.
+Checks the config, proves the container can actually reach Discord, logs in with
+your real token, lists the guilds the bot can see, and asks Discord which
+commands are registered where. It changes nothing.
+
+Every step prints as it happens and every wait prints its elapsed seconds, so a
+slow step is distinguishable from a hung one. Nothing here waits more than 30s.
 """
 from __future__ import annotations
 
 import asyncio
 import os
+import socket
 import sys
+import time
 
 OK, BAD, WARN, INFO = "  [ok]", "  [PROBLEM]", "  [warn]", "       "
 
+# discord.py needs all three: REST to log in, the gateway to stay connected,
+# and the CDN only for avatars. The first two are what break behind a firewall.
+REST_HOST, GATEWAY_HOST = "discord.com", "gateway.discord.gg"
 
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -25,8 +33,66 @@ def head(title: str):
     print(f"\n{title}\n" + "-" * len(title), flush=True)
 
 
+async def ticking(label: str, stop: asyncio.Event, every: float = 3.0):
+    """Print elapsed seconds while something slow runs.
+
+    Without this a stalled network call is indistinguishable from a hung
+    script, and people Ctrl+C out before the timeout ever fires.
+    """
+    t0 = time.monotonic()
+    while True:
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=every)
+            return
+        except asyncio.TimeoutError:
+            print(f"{INFO}   {int(time.monotonic() - t0)}s - still {label}", flush=True)
+
+
+async def with_ticker(label: str, coro, timeout: float):
+    """Await coro with a visible heartbeat and a hard ceiling."""
+    stop = asyncio.Event()
+    tick = asyncio.create_task(ticking(label, stop))
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    finally:
+        stop.set()
+        tick.cancel()
+        try:
+            await tick
+        except BaseException:
+            pass
+
+
+async def resolves(host: str) -> tuple[str, str]:
+    """(ip, error). DNS is the first thing to die in a container."""
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await with_ticker(
+            f"resolving {host}",
+            loop.getaddrinfo(host, 443, type=socket.SOCK_STREAM), timeout=10)
+        return infos[0][4][0], ""
+    except BaseException as e:   # noqa: BLE001
+        return "", f"{type(e).__name__}: {e}"
+
+
+async def connects(host: str, port: int = 443) -> str:
+    """"" on success, else the error. A plain TCP open, same as discord.py."""
+    try:
+        reader, writer = await with_ticker(
+            f"connecting to {host}:{port}",
+            asyncio.open_connection(host, port), timeout=15)
+        del reader
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return ""
+    except BaseException as e:   # noqa: BLE001
+        return f"{type(e).__name__}: {e}"
+
+
 async def main() -> int:
-    fix = "--fix" in sys.argv
     problems: list[str] = []
 
     head("1. Configuration")
@@ -62,8 +128,34 @@ async def main() -> int:
         print(f"\n{BAD} discord.py is not installed in this container.")
         print(f"{INFO} Rebuild the image: docker compose up -d --build")
         return 1
+    print(f"{OK} discord.py {discord.__version__} is installed")
 
-    head("2. Logging in to Discord")
+    # --------------------------------------------------------------------
+    # Reachability first. A login attempt against a blocked network looks
+    # exactly like a bad token from the outside, and takes far longer to fail.
+    head("2. Can this container reach Discord?")
+    for host in (REST_HOST, GATEWAY_HOST):
+        ip, err = await resolves(host)
+        if err:
+            print(f"{BAD} cannot resolve {host} - {err}")
+            print(f"{INFO} DNS is broken inside the container, so no login can work.")
+            print(f"{INFO} Check the host first:  getent hosts {host}")
+            print(f"{INFO} If the host resolves but the container does not, restart")
+            print(f"{INFO} Docker's DNS:  sudo systemctl restart docker")
+            return 1
+        print(f"{OK} {host} resolves to {ip}")
+        err = await connects(host)
+        if err:
+            print(f"{BAD} cannot open a TCP connection to {host}:443 - {err}")
+            print(f"{INFO} DNS works but traffic is blocked. Usual causes:")
+            print(f"{INFO}  - an egress firewall on this box or your router")
+            print(f"{INFO}  - a proxy the container is not configured to use")
+            print(f"{INFO} Compare from the host:  curl -sS -o /dev/null -w '%{{http_code}}\\n' https://{host}/api/v10/gateway")
+            return 1
+        print(f"{OK} TCP 443 to {host} is open")
+
+    # --------------------------------------------------------------------
+    head("3. Logging in to Discord")
     intents = discord.Intents.default()
     client = discord.Client(intents=intents)
     tree = app_commands.CommandTree(client)
@@ -87,8 +179,11 @@ async def main() -> int:
             cmds["global"] = f"could not read: {e}"
         result["commands"] = cmds
 
-    print(f"{INFO} connecting (30s timeout)...", flush=True)
+    print(f"{INFO} authenticating, then waiting for the gateway (30s ceiling)")
     login_task = asyncio.create_task(client.start(token))
+    stop_tick = asyncio.Event()
+    tick = asyncio.create_task(ticking("waiting for Discord", stop_tick))
+    t0 = time.monotonic()
     try:
         # Whichever finishes first: the gateway becomes ready, or start() blows
         # up with a login error. Waiting only on wait_until_ready() would hang
@@ -103,23 +198,37 @@ async def main() -> int:
         if ready not in done:
             raise TimeoutError("timed out waiting for the Discord gateway")
 
-        await inspect()
+        await with_ticker("reading commands from Discord", inspect(), timeout=30)
     except BaseException as e:   # noqa: BLE001 - CancelledError is not Exception
         name = type(e).__name__
-        print(f"{BAD} Login failed ({name}): {e}", flush=True)
+        waited = int(time.monotonic() - t0)
+        if name == "KeyboardInterrupt":
+            print(f"{WARN} Interrupted after {waited}s, before any verdict.")
+            print(f"{INFO} Nothing is wrong yet - it was still waiting. Re-run and")
+            print(f"{INFO} let it finish; it gives up on its own after 30s.")
+            return 130
+        print(f"{BAD} Login failed after {waited}s ({name}): {e}", flush=True)
         if "LoginFailure" in name or "Unauthorized" in name:
             print(f"{INFO} The token was rejected. Regenerate it at")
             print(f"{INFO} discord.com/developers > your app > Bot > Reset Token.")
             print(f"{INFO} Copy the BOT token - not the Client Secret, not the App ID.")
         elif "Timeout" in name:
-            print(f"{INFO} Connected to nothing within 30s. Check the container has")
-            print(f"{INFO} outbound internet: docker compose exec backend "
-                  f"python3 -c \"import socket;print(socket.gethostbyname('discord.com'))\"")
+            print(f"{INFO} The network checks above passed, so this is Discord's")
+            print(f"{INFO} gateway refusing to finish the handshake. Almost always")
+            print(f"{INFO} a session-start limit from restarting the bot repeatedly:")
+            print(f"{INFO} wait 10 minutes and re-run. If it persists, reset the")
+            print(f"{INFO} token (that clears the bot's sessions too).")
         elif "PrivilegedIntents" in name:
             print(f"{INFO} Enable the intents under Bot > Privileged Gateway Intents,")
             print(f"{INFO} or leave them off - this bot needs none.")
         return 1
     finally:
+        stop_tick.set()
+        tick.cancel()
+        try:
+            await tick
+        except BaseException:
+            pass
         try:
             await client.close()
         except Exception:
@@ -131,12 +240,9 @@ async def main() -> int:
         except BaseException:
             pass
 
-    if result.get("error"):
-        print(f"{BAD} Connected but failed while inspecting: {result['error']}")
-        return 1
     print(f"{OK} Logged in as {result['user']} (application id {result['app_id']})")
 
-    head("3. Servers this bot can see")
+    head("4. Servers this bot can see")
     guilds = result.get("guilds") or []
     if not guilds:
         print(f"{BAD} The bot is not in ANY server.")
@@ -157,7 +263,7 @@ async def main() -> int:
     elif guild_id:
         print(f"{OK} DISCORD_GUILD_ID matches a connected server.")
 
-    head("4. Commands registered with Discord")
+    head("5. Commands registered with Discord")
     cmds = result.get("commands") or {}
     any_registered = False
     for name, gid, _perms in guilds:
@@ -179,11 +285,6 @@ async def main() -> int:
     if not any_registered:
         problems.append("No commands are registered anywhere. Either the invite "
                         "lacked applications.commands, or the bot never synced.")
-
-    if fix:
-        head("5. Registering commands now (--fix)")
-        print(f"{INFO} Start the backend normally; it syncs on every boot.")
-        print(f"{INFO} docker compose restart backend")
 
     head("VERDICT")
     if not problems:
@@ -210,4 +311,6 @@ if __name__ == "__main__":
     try:
         sys.exit(asyncio.run(main()))
     except KeyboardInterrupt:
+        print("\n       Interrupted. Re-run and let it finish - it times out on "
+              "its own.", flush=True)
         sys.exit(130)
