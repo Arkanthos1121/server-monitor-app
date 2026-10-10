@@ -92,6 +92,46 @@ async def connects(host: str, port: int = 443) -> str:
         return f"{type(e).__name__}: {e}"
 
 
+def report_channels(chans: list, channel_id: str, problems: list) -> None:
+    """Section 6, split out so its logic is testable without a live login."""
+    usable = [c for c in chans if c["view"] and c["use_cmds"]]
+    if not chans:
+        print(f"{WARN} Could not read channel permissions.")
+    elif not usable:
+        print(f"{BAD} The bot cannot use commands in ANY channel.")
+        print(f"{INFO} Its role is denied 'View Channel' or 'Use Application")
+        print(f"{INFO} Commands' server-wide. Fix it in Server Settings > Roles.")
+        problems.append("The bot has no channel it can be used in, so its "
+                        "commands never appear however well they are registered.")
+    else:
+        shown = ", ".join("#" + c["name"] for c in usable[:12])
+        print(f"{OK} {len(usable)} usable channel(s): {shown}")
+        blocked = [c for c in chans if c not in usable]
+        if blocked:
+            print(f"{WARN} not usable: " + ", ".join("#" + c["name"] for c in blocked[:12]))
+            print(f"{INFO} Typing / in those will offer nothing. Right-click the")
+            print(f"{INFO} channel > Edit Channel > Permissions and allow the bot's")
+            print(f"{INFO} role to View Channel and Use Application Commands.")
+
+    if channel_id:
+        match = [c for c in chans if str(c["id"]) == channel_id]
+        if not match:
+            print(f"{BAD} DISCORD_CHANNEL_ID={channel_id} is not a text channel "
+                  f"this bot can see.")
+            problems.append(f"DISCORD_CHANNEL_ID={channel_id} is not visible to the "
+                            f"bot - auto-stop warnings will go nowhere. Use a channel "
+                            f"id from the list above.")
+        else:
+            c = match[0]
+            ok_here = c["view"] and c["use_cmds"]
+            print(f"{OK if ok_here else BAD} DISCORD_CHANNEL_ID is #{c['name']} "
+                  f"(view={c['view']}, send={c['send']}, commands={c['use_cmds']})")
+            if not ok_here:
+                problems.append(f"The bot cannot use commands in #{c['name']}, the "
+                                f"channel you configured. Allow its role to View "
+                                f"Channel and Use Application Commands there.")
+
+
 async def main() -> int:
     problems: list[str] = []
 
@@ -178,6 +218,24 @@ async def main() -> int:
         except Exception as e:  # noqa: BLE001
             cmds["global"] = f"could not read: {e}"
         result["commands"] = cmds
+
+        # Guild-level registration is not enough: a command only appears in a
+        # channel the bot can actually see. This is invisible from the guild
+        # view and is a common reason /commands stay missing after a good sync.
+        chans = []
+        for g in client.guilds:
+            me = g.me
+            for ch in getattr(g, "text_channels", []):
+                perms = ch.permissions_for(me) if me else None
+                if perms is None:
+                    continue
+                chans.append({
+                    "guild": g.name, "id": ch.id, "name": ch.name,
+                    "view": perms.view_channel,
+                    "send": perms.send_messages,
+                    "use_cmds": getattr(perms, "use_application_commands", True),
+                })
+        result["channels"] = chans
 
     print(f"{INFO} authenticating, then waiting for the gateway (30s ceiling)")
     login_task = asyncio.create_task(client.start(token))
@@ -285,6 +343,9 @@ async def main() -> int:
     if not any_registered:
         problems.append("No commands are registered anywhere. Either the invite "
                         "lacked applications.commands, or the bot never synced.")
+
+    head("6. Channels the bot can be used in")
+    report_channels(result.get("channels") or [], channel_id, problems)
 
     head("VERDICT")
     if not problems:
