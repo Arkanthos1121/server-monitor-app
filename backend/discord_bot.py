@@ -297,14 +297,47 @@ def build(db):
 
     @bot.event
     async def on_ready():
+        # Always say which guilds we can actually see, with ids. A mismatch
+        # between these and DISCORD_GUILD_ID is the usual reason commands never
+        # appear, and it is invisible from inside Discord.
+        if bot.guilds:
+            logger.info("discord: connected to %d guild(s): %s", len(bot.guilds),
+                        ", ".join(f"{g.name!r} (id {g.id})" for g in bot.guilds))
+        else:
+            logger.error("discord: the bot is not in ANY guild. Invite it with "
+                         "both the 'bot' and 'applications.commands' scopes.")
+
         try:
+            targets = []
             if GUILD_ID:
-                guild = discord.Object(id=int(GUILD_ID))
-                tree.copy_global_to(guild=guild)
-                await tree.sync(guild=guild)
+                targets = [discord.Object(id=int(GUILD_ID))]
+                if not any(str(g.id) == str(GUILD_ID) for g in bot.guilds):
+                    logger.error(
+                        "discord: DISCORD_GUILD_ID=%s is not a server this bot is "
+                        "in. Commands will not appear. Use one of the ids above - "
+                        "and make sure you copied the SERVER id, not a channel id.",
+                        GUILD_ID)
             else:
+                # No guild configured: sync to every guild we're in rather than
+                # globally. Global commands can take an hour to propagate, which
+                # reads as "the bot is broken".
+                targets = list(bot.guilds)
+                logger.info("discord: DISCORD_GUILD_ID not set - syncing directly "
+                            "to every connected guild instead of globally")
+
+            synced_total = 0
+            for target in targets:
+                tree.copy_global_to(guild=target)
+                cmds = await tree.sync(guild=target)
+                synced_total += len(cmds)
+                gid = getattr(target, "id", target)
+                logger.info("discord: synced %d commands to guild %s", len(cmds), gid)
+
+            if not targets:
                 await tree.sync()
-            logger.info(f"discord: logged in as {bot.user}, commands synced")
+                logger.warning("discord: no guilds to sync to; registered globally, "
+                               "which can take up to an hour to appear")
+            logger.info(f"discord: logged in as {bot.user}, {synced_total} commands synced")
             if not GUILD_ID:
                 logger.warning("discord: DISCORD_GUILD_ID is not set, so commands "
                                "were synced GLOBALLY - Discord can take up to an "

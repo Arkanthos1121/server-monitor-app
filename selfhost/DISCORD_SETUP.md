@@ -9,21 +9,33 @@ two realistic causes:
 
 1. The invite didn't grant `applications.commands`, so the bot is allowed to sit
    in your server but not to register commands in it.
-2. `DISCORD_GUILD_ID` isn't set, so commands were registered globally — Discord
-   can take **up to an hour** to show those.
+2. `DISCORD_GUILD_ID` points at the wrong place (a channel id, or a server the
+   bot isn't in).
+
+Since 2026-10-10 the bot no longer registers commands globally when
+`DISCORD_GUILD_ID` is unset — it syncs directly to **every server it is in**,
+which appears instantly. So leaving that variable blank is now a valid choice,
+and a wrong value is worse than no value.
 
 Work through this in order. Steps 1–3 take about five minutes.
 
 ---
 
-## Step 0 — Find out which one it is
-
-On the gameserver:
+## Step 0 — Run the diagnosis
 
 ```bash
 cd /opt/server-monitor-app && git pull
-cd selfhost
-docker compose up -d --build
+cd selfhost && docker compose up -d --build
+docker compose exec backend python3 diagnose_discord.py
+```
+
+It logs in with your real token and prints which servers the bot can see **with
+their ids**, which commands Discord has registered where, and a verdict naming
+the exact fix. Do what it says; the rest of this file is background.
+
+If you'd rather read the log directly:
+
+```bash
 docker compose logs backend | grep -i discord
 ```
 
